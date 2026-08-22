@@ -1,0 +1,43 @@
+{
+  "name": "CyberShield India",
+  "short_name": "CyberShield",
+  "description": "India's AI-Powered Digital Safety Platform",
+  "start_url": "/app",
+  "display": "standalone",
+  "background_color": "#0a0e1a",
+  "theme_color": "#FF9933",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["security", "utilities"],
+  "lang": "en-IN",
+  "dir": "ltr",
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Scan for Threats",
+      "short_name": "Scan",
+      "url": "/app/scam-scanner",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Emergency SOS",
+      "short_name": "SOS",
+      "url": "/app/emergency-sos",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

@@ -1,0 +1,596 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Sora:wght@700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+/* ── Tailwind v4 Theme ── */
+@theme {
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-display: 'Sora', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Official Design System Color Tokens */
+  --color-bg-base:       #0A0E1A;
+  --color-bg-surface:    #131A2C;
+  --color-bg-raised:     #1A2238;
+  --color-border-subtle: rgba(255,255,255,0.10);
+  --color-brand-cyan:    #22D3EE;
+  --color-brand-blue:    #3D5AFE;
+  --color-status-success: #10B981;
+  --color-status-warning: #F5A623;
+  --color-status-danger:  #EF4444;
+  --color-accent-pink:    #EC4899;
+  --color-accent-purple:  #8B5CF6;
+  --color-text-primary:   #F8FAFC;
+  --color-text-secondary: #94A3B8;
+
+  --shadow-neon-cyan:    0 0 20px rgba(34,211,238,0.4), 0 0 40px rgba(34,211,238,0.15);
+  --shadow-neon-emerald: 0 0 20px rgba(16,185,129,0.4), 0 0 40px rgba(16,185,129,0.15);
+  --shadow-neon-red:     0 0 30px rgba(239,68,68,0.5);
+  --shadow-glass:        0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+  --shadow-card:         0 4px 24px rgba(0,0,0,0.6);
+
+  --animate-pulse-slow:  pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-float:       float 6s ease-in-out infinite;
+  --animate-scan:        scan 2s linear infinite;
+  --animate-shimmer:     shimmer 2s linear infinite;
+  --animate-siren:       siren 1.5s ease-in-out infinite;
+
+  --radius-xl2: 1.25rem;
+  --radius-xl3: 1.5rem;
+}
+
+/* ── Base Reset ── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  background-image: 
+    radial-gradient(circle at 15% 50%, rgba(59, 111, 240, 0.05), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(34, 211, 238, 0.05), transparent 25%);
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--color-bg-base); }
+::-webkit-scrollbar-thumb { background: var(--color-bg-raised); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-brand-blue); }
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-bg-raised) var(--color-bg-base);
+}
+
+/* ── Glassmorphism ── */
+.glass {
+  background: rgba(19, 26, 44, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--color-border-subtle);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+
+.glass-dark {
+  background: rgba(10, 14, 26, 0.85);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--color-border-subtle);
+}
+
+.glass-hover {
+  transition: all 0.3s;
+}
+.glass-hover:hover {
+  background: rgba(26, 34, 56, 0.75);
+  border-color: var(--color-brand-cyan);
+  box-shadow: 0 8px 32px rgba(34, 211, 238, 0.1);
+  transform: translateY(-2px);
+}
+
+/* ── Cyber Grid ── */
+.cyber-grid-bg {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+  background-size: 30px 30px;
+}
+
+/* ── Typography & Gradients ── */
+.gradient-text {
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  background-image: linear-gradient(135deg, var(--color-text-primary) 0%, var(--color-text-secondary) 100%);
+}
+
+.gradient-text-accent {
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  background-image: linear-gradient(135deg, var(--color-brand-cyan) 0%, var(--color-brand-blue) 100%);
+}
+
+/* ── Buttons ── */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.5rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+  background: linear-gradient(135deg, var(--color-brand-blue), #2563eb);
+  color: white;
+  box-shadow: 0 4px 14px rgba(59, 111, 240, 0.3);
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.1);
+  text-decoration: none;
+}
+.btn-primary:hover { box-shadow: 0 6px 20px rgba(59, 111, 240, 0.5); transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.5rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  color: #e2e8f0;
+  border: 1px solid var(--color-border-subtle);
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn-secondary:hover { border-color: var(--color-brand-cyan); background: rgba(255, 255, 255, 0.1); transform: translateY(-1px); }
+
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.875rem 1.5rem;
+  border-radius: 0.5rem;
+  font-weight: 700;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+  background: linear-gradient(135deg, var(--color-status-danger), #dc2626);
+  color: white;
+  box-shadow: 0 4px 20px rgba(239,68,68,0.4);
+  cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.btn-danger:hover { box-shadow: 0 8px 30px rgba(239,68,68,0.6); transform: translateY(-2px); }
+
+/* ── Cards ── */
+.card {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl2);
+  padding: 1.5rem;
+}
+
+.card-hover {
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl2);
+  padding: 1.5rem;
+  transition: all 0.3s;
+  cursor: pointer;
+  text-decoration: none;
+}
+.card-hover:hover {
+  background: var(--color-bg-raised);
+  border-color: var(--color-brand-cyan);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  transform: translateY(-2px);
+}
+
+/* ── Inputs ── */
+@layer base {
+  .input, .textarea {
+    width: 100%;
+    padding: 0.875rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #f1f5f9;
+    background: rgba(2, 6, 23, 0.8);
+    border: 1px solid rgba(255,255,255,0.1);
+    transition: all 0.2s;
+    outline: none;
+    font-family: inherit;
+  }
+  .input::placeholder, .textarea::placeholder { color: #64748b; }
+  .input:focus, .textarea:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+  .relative > svg.absolute { pointer-events: none; }
+}
+
+/* ── Layout ── */
+.section      { padding: 5rem 1rem; }
+.section-sm   { padding: 3rem 1rem; }
+.container-custom { max-width: 80rem; margin: 0 auto; }
+
+/* ── SOS & Emergency ── */
+.sos-button {
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ef4444, #991b1b);
+  border: 4px solid #f87171;
+  box-shadow: 0 0 40px rgba(239, 68, 68, 0.6), inset 0 0 20px rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: white;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: all 0.2s;
+  animation: pulse 2s infinite;
+}
+.sos-button:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 60px rgba(239, 68, 68, 0.8);
+}
+.sos-button:active {
+  transform: scale(0.95);
+}
+
+/* ── Animations & Keyframes ── */
+@keyframes siren {
+  0%, 100% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.1); }
+  50% { box-shadow: 0 0 60px rgba(239, 68, 68, 0.8); background: rgba(239, 68, 68, 0.3); }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.8; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes scan {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  15%, 45%, 75% { transform: translateX(-6px); }
+  30%, 60%, 90% { transform: translateX(6px); }
+}
+
+.animate-shake {
+  animation: shake 0.4s ease-in-out;
+}
+
+/* ── Badges ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-width: 1px;
+}
+
+.badge-info {
+  background-color: rgba(6, 182, 212, 0.1);
+  color: #06b6d4;
+  border-color: rgba(6, 182, 212, 0.2);
+}
+
+.badge-safe {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+  border-color: rgba(16, 185, 129, 0.2);
+}
+
+.badge-warning {
+  background-color: rgba(234, 179, 8, 0.1);
+  color: #eab308;
+  border-color: rgba(234, 179, 8, 0.2);
+}
+
+.badge-danger {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.badge-purple {
+  background-color: rgba(139, 92, 246, 0.1);
+  color: #8b5cf6;
+  border-color: rgba(139, 92, 246, 0.2);
+}
+
+/* ── Stat Cards ── */
+.stat-card {
+  position: relative;
+  background: rgba(10, 25, 59, 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  overflow: hidden;
+  transition: all 0.3s;
+}
+
+.stat-card:hover {
+  background: rgba(15, 35, 75, 0.6);
+  border-color: rgba(6, 182, 212, 0.2);
+  transform: translateY(-2px);
+}
+
+/* ── Progress Bars ── */
+.progress-bar {
+  width: 100%;
+  height: 0.5rem;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+/* ── Agent Status Dots ── */
+.agent-dot-active {
+  background-color: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: pulse 1.5s infinite;
+}
+
+.agent-dot-warning {
+  background-color: #eab308;
+  box-shadow: 0 0 8px #eab308;
+  animation: pulse 1.5s infinite;
+}
+
+/* ── Loading Skeleton ── */
+.skeleton {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.1) 50%, rgba(255, 255, 255, 0.05) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ── Glowing Blobs ── */
+.glow-blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+  mix-blend-mode: screen;
+  animation: float 8s ease-in-out infinite;
+}
+
+/* ── Navigation Links ── */
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #94a3b8;
+  border-radius: 0.5rem;
+  border: 1px solid transparent;
+  transition: all 0.2s ease-in-out;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.nav-link:hover {
+  color: #f8fafc;
+  background-color: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.02);
+}
+
+.nav-link.active {
+  font-weight: 600;
+  border-left-width: 3px;
+}
+
+/* ── High Contrast Mode (WCAG 2.1 AA Compliance) ── */
+.high-contrast {
+  --color-surface-900: #000000 !important;
+  --color-surface-800: #000000 !important;
+  --color-surface-700: #111111 !important;
+  --color-surface-600: #222222 !important;
+  --color-surface-500: #333333 !important;
+  
+  --color-neon-cyan: #00ffff !important;
+  --color-neon-emerald: #00ff00 !important;
+  --color-neon-yellow: #ffff00 !important;
+  --color-neon-red: #ff0000 !important;
+  --color-neon-purple: #ff00ff !important;
+  
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+.high-contrast body {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+  background-image: none !important;
+}
+
+.high-contrast .glass,
+.high-contrast .glass-dark,
+.high-contrast .card,
+.high-contrast .card-hover,
+.high-contrast .stat-card {
+  background: #000000 !important;
+  border: 2px solid #ffffff !important;
+  box-shadow: none !important;
+  color: #ffffff !important;
+}
+
+.high-contrast .glow-blob,
+.high-contrast .cyber-grid-bg {
+  display: none !important;
+}
+
+.high-contrast a,
+.high-contrast button,
+.high-contrast p,
+.high-contrast span,
+.high-contrast h1,
+.high-contrast h2,
+.high-contrast h3,
+.high-contrast h4 {
+  color: #ffffff !important;
+  text-shadow: none !important;
+}
+
+.high-contrast .btn-primary,
+.high-contrast .btn-danger,
+.high-contrast .btn-secondary {
+  background: #000000 !important;
+  color: #ffff00 !important;
+  border: 2px solid #ffff00 !important;
+  box-shadow: none !important;
+  font-weight: 900 !important;
+}
+
+.high-contrast .btn-primary:hover,
+.high-contrast .btn-danger:hover,
+.high-contrast .btn-secondary:hover {
+  background: #ffff00 !important;
+  color: #000000 !important;
+}
+
+/* ── AAA Font Size Scaling ── */
+html.text-scale-small {
+  font-size: 87.5%; /* 14px default */
+}
+
+html.text-scale-medium {
+  font-size: 100%; /* 16px default */
+}
+
+html.text-scale-large {
+  font-size: 118.75%; /* 19px default - for elder citizens */
+}
+
+/* ── Saffron-White-Green Tricolor Accent Line ── */
+.tricolor-accent-bar {
+  width: 100%;
+  height: 4px;
+  background: linear-gradient(90deg, #FF9933 0%, #FF9933 33%, #FFFFFF 33%, #FFFFFF 66%, #138808 66%, #138808 100%);
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 100;
+}
+
+/* ── RTL (Right-to-Left) Support for Urdu ── */
+[dir="rtl"] {
+  text-align: right;
+}
+
+[dir="rtl"] .sidebar-nav {
+  left: auto;
+  right: 0;
+}
+
+[dir="rtl"] .main-content {
+  margin-left: 0;
+  margin-right: 72px;
+}
+
+@media (min-width: 1024px) {
+  [dir="rtl"] .main-content-expanded {
+    margin-left: 0;
+    margin-right: 260px;
+  }
+}
+
+/* Flip flex row directions in RTL */
+[dir="rtl"] .flex-row,
+[dir="rtl"] .flex {
+  /* Only flip explicit row layouts, not column */
+}
+
+/* Mirror specific icon/arrow directions */
+[dir="rtl"] .rtl-flip {
+  transform: scaleX(-1);
+}
+
+/* Ensure proper alignment for stats and cards */
+[dir="rtl"] .stat-card,
+[dir="rtl"] .glass {
+  text-align: right;
+}
+
+/* Fix search input and icon alignment */
+[dir="rtl"] input[type="text"],
+[dir="rtl"] input[type="email"],
+[dir="rtl"] input[type="tel"],
+[dir="rtl"] input[type="password"],
+[dir="rtl"] textarea {
+  text-align: right;
+  direction: rtl;
+}
+
+/* Sidebar text alignment */
+[dir="rtl"] .nav-label {
+  text-align: right;
+}
+
+/* Badge positioning */
+[dir="rtl"] .badge-right {
+  left: 0.5rem;
+  right: auto;
+}
+
+/* Tricolor bar flip */
+[dir="rtl"] .tricolor-accent-bar {
+  left: auto;
+  right: 0;
+  background: linear-gradient(270deg, #FF9933 0%, #FF9933 33%, #FFFFFF 33%, #FFFFFF 66%, #138808 66%, #138808 100%);
+}
+
+/* ── Indic Script Overflow Prevention ── */
+/* Telugu, Tamil, Kannada, Malayalam, Bengali etc. can run wider than English */
+.nav-item-label,
+.stat-label,
+.card-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Allow wrapping for longer descriptions in Indic scripts */
+.card-description,
+.section-subtitle {
+  word-break: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}

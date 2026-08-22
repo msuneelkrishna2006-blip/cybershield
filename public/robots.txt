@@ -1,0 +1,8 @@
+# CyberShield India — robots.txt
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /app/
+Disallow: /admin/
+
+Sitemap: https://cybershield.in/sitemap.xml
