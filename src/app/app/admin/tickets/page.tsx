@@ -90,7 +90,7 @@ export default function SupportTicketsAdminPage() {
                       ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20'
                       : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
                   }`}>
-                    {ticket.name.charAt(0)}
+                    {ticket?.name?.charAt(0) || 'T'}
                   </div>
                   <div>
                     <h4 className="font-extrabold text-white text-sm flex items-center gap-2">

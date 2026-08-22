@@ -39,11 +39,16 @@ export function AlertsProvider({ children }: { children: ReactNode }) {
   }
 
   // Load alerts from SQLite on mount / user change
-  useEffect(() => {
-    if (user) {
-      loadAlerts()
-    }
-  }, [user])
+  // Load alerts when user changes
+useEffect(() => {
+  if (!user) return
+
+  const timer = setTimeout(() => {
+    void loadAlerts()
+  }, 0)
+
+  return () => clearTimeout(timer)
+}, [user])
 
   // Connection Resilience & BroadcastChannel tab sync
   useEffect(() => {

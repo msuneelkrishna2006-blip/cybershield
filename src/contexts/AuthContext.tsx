@@ -46,9 +46,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   // Load user on mount
-  useEffect(() => {
-    loadProfile()
-  }, [loadProfile])
+useEffect(() => {
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  void loadProfile()
+}, [loadProfile])
 
   // Auto-refresh token every 10 minutes (600,000 ms)
   useEffect(() => {

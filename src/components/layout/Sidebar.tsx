@@ -129,7 +129,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen, setMobileOpen, onSOSC
           <div className="p-4 border-t border-white/5">
             <div className={cn("flex items-center gap-3", collapsed ? "justify-center" : "")}>
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center text-white font-bold shrink-0 border border-white/10">
-                {user.name.charAt(0)}
+                {user?.name?.charAt(0) || 'U'}
               </div>
               
               {!collapsed && (
