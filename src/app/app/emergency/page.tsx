@@ -225,27 +225,29 @@ export default function EmergencyPage() {
                 </div>
 
                 {/* Actions Button Block */}
-                {helpline.call?.href && (
-                <a
-                  href={helpline.call.href}
-                  className="flex-1 font-extrabold text-sm py-3 px-4 rounded-xl text-center"
-                  aria-label={`Call ${helpline.title} at ${helpline.call.label ?? ''}`}
-                >
-                  {helpline.call.label}
-                </a>
-              )}
-                  {'secondary' in helpline && helpline.secondary && (
-                    <a
-                      href={helpline.secondary.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={`flex-1 font-bold text-sm py-3 px-4 rounded-xl text-center transition-all border border-white/10 text-white hover:bg-white/5`}
-                      aria-label={`How to Report on ${helpline.title} portal`}
-                    >
-                      {helpline.secondary.label}
-                    </a>
-                  )}
-                </div>
+<div className="flex flex-col sm:flex-row gap-3 mt-6 pt-4 border-t border-white/5">
+  {helpline.call?.href && (
+    <a
+      href={helpline.call.href}
+      className="flex-1 font-extrabold text-sm py-3 px-4 rounded-xl text-center"
+      aria-label={`Call ${helpline.title} at ${helpline.call.label ?? ''}`}
+    >
+      {helpline.call.label ?? 'Call'}
+    </a>
+  )}
+
+  {helpline.secondary?.href && (
+    <a
+      href={helpline.secondary.href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex-1 font-bold text-sm py-3 px-4 rounded-xl text-center transition-all border border-white/10 text-white hover:bg-white/5"
+      aria-label={`How to Report on ${helpline.title} portal`}
+    >
+      {helpline.secondary.label ?? 'Report'}
+    </a>
+  )}
+</div>
             </Card>
             )
           })}
