@@ -287,7 +287,7 @@ export default function DashboardHome() {
                 <div key={member.id} className="flex items-center justify-between p-2 rounded-xl hover:bg-white/[0.02] transition-colors" dir={isUrdu ? 'rtl' : 'ltr'}>
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-full bg-slate-800 border border-white/5 flex items-center justify-center text-xs font-bold text-slate-300">
-                      {member.name.charAt(0)}
+                      {member?.name?.charAt(0) || 'U'}
                     </div>
                     <div>
                       <p className="text-xs font-bold text-white">{member.name}</p>

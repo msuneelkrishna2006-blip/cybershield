@@ -182,7 +182,7 @@ export default function MemberDetailsPage({ params }: PageProps) {
               <RiskScore score={member.riskScore} size={120} />
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="w-20 h-20 rounded-full bg-slate-800 border-2 border-white/10 flex items-center justify-center text-white text-3xl font-black">
-                  {member.user?.name ? member.user.name.charAt(0) : member.relation.charAt(0)}
+                  {(member.user?.name ?? member.relation ?? 'U').charAt(0)}
                 </div>
               </div>
             </div>
