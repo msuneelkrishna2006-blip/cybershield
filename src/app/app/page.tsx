@@ -131,7 +131,7 @@ export default function DashboardHome() {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div dir={isUrdu ? 'rtl' : 'ltr'}>
           <h1 className="text-3xl font-black text-white mb-1">
-            {t('welcomeBack', { name: '' })}<span className="gradient-text">{user.name.split(' ')[0]}</span>
+            {t('welcomeBack', { name: '' })}<span className="gradient-text">{(user?.name ?? '').split(' ')[0] || 'User'}</span>
           </h1>
           <p className="text-slate-400 text-sm">{t('subtitle')}</p>
         </div>
