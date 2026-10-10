@@ -22,9 +22,23 @@ export default function LandingPage() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const res = await fetch('/api/v1/threats/stats')
+        // Check if demo mode is requested via URL
+        const urlParams = new URLSearchParams(window.location.search)
+        const demoMode = urlParams.get('demo') === 'true'
+        
+        const res = await fetch(`/api/v1/threats/stats${demoMode ? '?demo=true' : ''}`)
         const json = await res.json()
         if (json.success && json.data) {
+          // If real data shows zeros and no demo flag, auto-load demo data for presentation
+          if (!demoMode && json.data.stats.totalScans === 0) {
+            const demoRes = await fetch('/api/v1/threats/stats?demo=true')
+            const demoJson = await demoRes.json()
+            if (demoJson.success && demoJson.data) {
+              setStats(demoJson.data.stats)
+              setDataQuality(demoJson.data.dataQuality)
+              return
+            }
+          }
           setStats(json.data.stats)
           setDataQuality(json.data.dataQuality)
         }

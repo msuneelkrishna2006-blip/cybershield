@@ -15,6 +15,7 @@ import { getAccessToken } from '@/lib/auth/cookies';
 import { analyzeWithFallback, getProviderChain } from '@/lib/ai';
 import { apiSuccess, apiError } from '@/lib/api/response';
 import type { ScanType } from '@/lib/ai';
+import { runScanPipeline } from '@/lib/agents/scan-pipeline';
 
 const scanSubmitSchema = z.object({
   content: z.string().min(1).max(10000, 'Content must not exceed 10,000 characters').trim(),
@@ -23,6 +24,7 @@ const scanSubmitSchema = z.object({
     'job_offer', 'loan_offer', 'investment', 'qr', 'general',
   ]),
   familyMemberId: z.string().optional(),
+  pipeline: z.boolean().optional(), // Use multi-agent pipeline
 });
 
 /**
@@ -51,14 +53,43 @@ export async function POST(request: NextRequest) {
       return apiError('VALIDATION_ERROR', 'Invalid scan input', 400, parsed.error.flatten().fieldErrors);
     }
 
-    const { content, type, familyMemberId } = parsed.data;
+    const { content, type, familyMemberId, pipeline: usePipeline } = parsed.data;
 
-    // Run AI analysis with fallback chain
-    const providers = getProviderChain();
-    const { result, provider, fallback } = await analyzeWithFallback(providers, {
-      content,
-      type: type as ScanType,
-    });
+    let result: any;
+    let provider = 'pipeline';
+    let fallback = false;
+    let pipelineResult: any = null;
+
+    if (usePipeline && ['url', 'sms', 'email', 'whatsapp', 'qr'].includes(type)) {
+      // Multi-agent pipeline path
+      pipelineResult = await runScanPipeline({
+        scanType: type as 'url' | 'sms' | 'email' | 'whatsapp' | 'qr',
+        content,
+        userId: payload.userId,
+      });
+
+      // Map pipeline result to existing format for DB storage compatibility
+      result = {
+        riskScore: pipelineResult.riskScore,
+        riskLevel: pipelineResult.riskLevel,
+        category: pipelineResult.scanType,
+        explanation: pipelineResult.verdict,
+        indicators: pipelineResult.reasoning.flatMap((a: any) => a.signals.map((s: any) => s.description)),
+        confidence: pipelineResult.riskScore / 100,
+        recommendedAction: pipelineResult.recommendations[0] || 'Exercise caution.',
+        safeNextSteps: pipelineResult.recommendations,
+      };
+    } else {
+      // Legacy direct AI path
+      const providers = getProviderChain();
+      const aiResponse = await analyzeWithFallback(providers, {
+        content,
+        type: type as ScanType,
+      });
+      result = aiResponse.result;
+      provider = aiResponse.provider;
+      fallback = aiResponse.fallback;
+    }
 
     // Determine family member context
     let memberId = familyMemberId;
@@ -133,6 +164,15 @@ export async function POST(request: NextRequest) {
         recommendedAction: result.recommendedAction,
         safeNextSteps: result.safeNextSteps,
       },
+      // Multi-agent pipeline details (only present when pipeline=true)
+      ...(pipelineResult ? {
+        pipeline: {
+          verdict: pipelineResult.verdict,
+          agents: pipelineResult.reasoning,
+          recommendations: pipelineResult.recommendations,
+          helpline: pipelineResult.helpline,
+        },
+      } : {}),
       metadata: {
         provider,
         fallback,

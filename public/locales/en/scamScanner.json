@@ -1,8 +1,10 @@
 {
   "title": "Multi-Agent Scam Scanner",
   "subtitle": "Instantly analyze suspicious messages, links, and screenshots using specialized AI agents.",
-  "tabMessage": "Message Text",
-  "tabLink": "Website Link",
+  "tabMessage": "SMS Text",
+  "tabLink": "URL / Link",
+  "tabEmail": "Email",
+  "tabWhatsApp": "WhatsApp",
   "tabQr": "QR Code",
   "tabScreenshot": "Screenshot",
   "messagePlaceholder": "Paste the suspicious SMS, WhatsApp message, or email here...",

@@ -13,6 +13,8 @@ import { getAccessToken } from '@/lib/auth/cookies';
 import { chatWithFallback, getProviderChain, detectPromptInjection, stripSensitiveData } from '@/lib/ai';
 import { apiSuccess, apiError } from '@/lib/api/response';
 
+import { searchPatterns, formatPatternResponse } from '@/lib/knowledge/scam-patterns';
+
 const chatSchema = z.object({
   messages: z.array(z.object({
     role: z.enum(['user', 'assistant', 'system']),
@@ -54,11 +56,31 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // RAG-lite: Search knowledge base for relevant scam patterns
+    let knowledgeContext = '';
+    if (lastUserMsg) {
+      const relevantPatterns = searchPatterns(lastUserMsg.content, 3);
+      if (relevantPatterns.length > 0) {
+        knowledgeContext = '\n\n--- RELEVANT KNOWLEDGE BASE ENTRIES ---\n' +
+          relevantPatterns.map(p => formatPatternResponse(p)).join('\n---\n') +
+          '\n--- END KNOWLEDGE BASE ---\n' +
+          'Use the above information to provide accurate, specific advice. Always include the relevant helpline number.';
+      }
+    }
+
     // Strip sensitive data from user messages before sending to AI
     const sanitizedMessages = messages.map(m => ({
       ...m,
       content: m.role === 'user' ? stripSensitiveData(m.content) : m.content,
     }));
+
+    // Inject knowledge base context as system message if we found relevant patterns
+    if (knowledgeContext) {
+      sanitizedMessages.unshift({
+        role: 'system' as const,
+        content: knowledgeContext,
+      });
+    }
 
     const providers = getProviderChain();
     const { response, provider } = await chatWithFallback(providers, sanitizedMessages);

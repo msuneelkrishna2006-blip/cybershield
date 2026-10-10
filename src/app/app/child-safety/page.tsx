@@ -168,6 +168,7 @@ function GuardianView({
   setSelectedChildId
 }: GuardianViewProps) {
   const { t } = useTranslation('childSafety')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'analyze'>('dashboard')
   
   const activeChild = childrenList.find(c => c.id === selectedChildId)
   const childProfile = activeChild ? profiles.find(p => p.memberId === activeChild.id) : null
@@ -312,12 +313,56 @@ function GuardianView({
         </div>
       </div>
 
+      {/* Tab Bar */}
+      <div className="flex gap-1 bg-white/5 rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors cursor-pointer ${
+            activeTab === 'dashboard' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          Dashboard
+        </button>
+        <button
+          onClick={() => setActiveTab('analyze')}
+          className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors cursor-pointer ${
+            activeTab === 'analyze' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'text-slate-400 hover:text-white'
+          }`}
+        >
+          🔍 Analyze Chat
+        </button>
+      </div>
+
+      {activeTab === 'analyze' && (
+        <AnalyzeChatSection />
+      )}
+
+      {activeTab === 'dashboard' && (
+      <>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard 
           title={t('screenTime')}
           value={formattedTimeStr}
           icon={<Clock className="w-6 h-6 text-blue-400" />}
           color="blue"
+        />
+        <StatCard 
+          title={t('contentAlerts')}
+          value={String(childAlerts.length)}
+          icon={<AlertTriangle className="w-6 h-6 text-yellow-400" />}
+          color="yellow"
+        />
+        <StatCard 
+          title={t('gamesAccess')}
+          value={appUsage.filter((u: any) => u.category === 'game').length > 0 ? String(appUsage.filter((u: any) => u.category === 'game').length) : '0'}
+          icon={<Gamepad2 className="w-6 h-6 text-green-400" />}
+          color="green"
+        />
+        <StatCard 
+          title={t('webSearches')}
+          value={appUsage.filter((u: any) => u.category === 'browser').length > 0 ? String(appUsage.filter((u: any) => u.category === 'browser').reduce((a: number, b: any) => a + (b.sessionsCount || 0), 0)) : '0'}
+          icon={<Search className="w-6 h-6 text-cyan-400" />}
+          color="cyan"
         />
         <StatCard 
           title={t('safetyScore')}
@@ -455,6 +500,187 @@ function GuardianView({
         </div>
 
       </div>
+
+      </>
+      )}
+    </div>
+  )
+}
+
+/** Analyze Chat Section — paste chat text for grooming/bullying analysis */
+function AnalyzeChatSection() {
+  const [chatText, setChatText] = useState('')
+  const [childAge, setChildAge] = useState('')
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [analysisResult, setAnalysisResult] = useState<any>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleAnalyze = async () => {
+    if (!chatText.trim()) return
+    setIsAnalyzing(true)
+    setAnalysisResult(null)
+    setError(null)
+
+    try {
+      const res = await fetch('/api/v1/child-safety/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: chatText, childAge: childAge || undefined }),
+      })
+      const data = await res.json()
+      if (data.success && data.data) {
+        setAnalysisResult(data.data)
+      } else {
+        setError(data.error?.message || 'Analysis failed')
+      }
+    } catch {
+      setError('Network error — please try again')
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
+  const getRiskBg = (level: string) => {
+    switch (level) {
+      case 'CRITICAL': return 'bg-red-500/10 border-red-500/30 text-red-400'
+      case 'HIGH': return 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+      case 'MEDIUM': return 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
+      case 'LOW': return 'bg-blue-400/10 border-blue-400/30 text-blue-400'
+      default: return 'bg-emerald-400/10 border-emerald-400/30 text-emerald-400'
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="border border-purple-500/20">
+        <h3 className="text-lg font-bold text-white mb-1 flex items-center gap-2">
+          <Eye className="w-5 h-5 text-purple-400" />
+          Analyze Chat for Safety Risks
+        </h3>
+        <p className="text-sm text-slate-400 mb-4">
+          Paste any chat conversation (WhatsApp, Instagram, SMS) to check for grooming, bullying, or manipulation patterns.
+        </p>
+
+        {/* Privacy Notice */}
+        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-3 mb-4 flex items-start gap-2">
+          <Lock className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />
+          <p className="text-xs text-emerald-300">
+            <strong>Privacy:</strong> Submitted text is analyzed in real-time and <strong>NOT stored</strong> after results are returned. Only risk metadata is logged.
+          </p>
+        </div>
+
+        <textarea
+          value={chatText}
+          onChange={(e) => setChatText(e.target.value)}
+          placeholder="Paste the chat conversation here... (e.g., WhatsApp messages, Instagram DMs, SMS thread)"
+          className="w-full h-40 bg-black/30 border border-white/10 rounded-lg p-4 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-purple-500/50"
+        />
+
+        <div className="flex items-center gap-3 mt-3">
+          <select
+            value={childAge}
+            onChange={(e) => setChildAge(e.target.value)}
+            className="bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white cursor-pointer"
+          >
+            <option value="">Child&apos;s Age (optional)</option>
+            {Array.from({ length: 12 }, (_, i) => i + 6).map(age => (
+              <option key={age} value={String(age)}>{age} years old</option>
+            ))}
+          </select>
+
+          <button
+            onClick={handleAnalyze}
+            disabled={isAnalyzing || !chatText.trim()}
+            className="ml-auto px-6 py-2 bg-purple-500 hover:bg-purple-600 disabled:bg-purple-500/30 text-white font-bold rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed text-sm"
+          >
+            {isAnalyzing ? 'Analyzing...' : '🔍 Analyze Chat'}
+          </button>
+        </div>
+
+        {error && (
+          <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+            {error}
+          </div>
+        )}
+      </Card>
+
+      {/* Analysis Progress */}
+      {isAnalyzing && (
+        <Card className="border-purple-500/30">
+          <div className="flex items-center gap-3">
+            <Spinner className="w-5 h-5 text-purple-400" />
+            <div>
+              <p className="font-bold text-white text-sm">Analyzing conversation...</p>
+              <p className="text-xs text-purple-400 animate-pulse">Checking for grooming, bullying, and manipulation patterns</p>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Analysis Results */}
+      {analysisResult && !isAnalyzing && (
+        <Card className={`border-2 ${getRiskBg(analysisResult.riskLevel)}`}>
+          <p className="text-xl font-black mb-3">{analysisResult.verdict}</p>
+
+          <div className="flex items-center gap-3 mb-4">
+            <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getRiskBg(analysisResult.riskLevel)}`}>
+              {analysisResult.riskLevel}
+            </span>
+            {analysisResult.parentAlert && (
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+                ⚠️ Parent Alert Recommended
+              </span>
+            )}
+          </div>
+
+          {/* Detected Categories */}
+          {analysisResult.categories && analysisResult.categories.length > 0 && (
+            <div className="mb-4">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Detected Patterns</h4>
+              <div className="flex flex-wrap gap-2">
+                {analysisResult.categories.map((cat: string, i: number) => (
+                  <span key={i} className="px-2 py-1 rounded bg-white/10 text-xs text-white font-medium capitalize">
+                    {cat}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Indicators */}
+          {analysisResult.indicators && analysisResult.indicators.length > 0 && (
+            <div className="mb-4 bg-black/20 rounded-lg p-4">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Specific Indicators Found</h4>
+              <div className="space-y-2">
+                {analysisResult.indicators.map((ind: any, i: number) => (
+                  <div key={i} className="flex items-start gap-2 text-sm">
+                    <AlertTriangle size={14} className="text-yellow-400 mt-0.5 shrink-0" />
+                    <div>
+                      <span className="text-white font-medium">{ind.pattern}: </span>
+                      <span className="text-slate-300">{ind.description}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Recommendations */}
+          {analysisResult.recommendations && analysisResult.recommendations.length > 0 && (
+            <div className="bg-black/20 rounded-lg p-4">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Recommended Actions</h4>
+              <ul className="space-y-2">
+                {analysisResult.recommendations.map((rec: string, i: number) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-slate-200">
+                    <span className="mt-1 w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                    {rec}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </Card>
+      )}
     </div>
   )
 }
