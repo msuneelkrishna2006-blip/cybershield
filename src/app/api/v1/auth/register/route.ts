@@ -1,140 +1,118 @@
-/**
- * CyberShield India — Registration API
- * POST /api/v1/auth/register
- *
- * Creates a new user account with secure password hashing.
- * Returns httpOnly secure cookies with auth tokens.
- */
-
+import { createHash, randomBytes } from 'crypto';
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
+import { apiError, apiSuccess } from '@/lib/api/response';
+import { hasValidCsrfOrigin } from '@/lib/auth/csrf';
+import { scheduleAuthEmail } from '@/lib/auth/email';
 import { hashPassword, validatePasswordStrength } from '@/lib/auth/password';
-import { signAccessToken, signRefreshToken } from '@/lib/auth/jwt';
-import { setAuthCookies } from '@/lib/auth/cookies';
-import { createSession } from '@/lib/auth/session';
-import { apiSuccess, apiError } from '@/lib/api/response';
+import { authRateLimiter, getRequestIp, hashRateLimitKey } from '@/lib/auth/rate-limit';
+import { waitForMinimumResponseTime } from '@/lib/auth/response-timing';
 
 const registerSchema = z.object({
   name: z.string().min(2).max(100).trim(),
-  email: z.string().email().toLowerCase().trim().optional(),
-  phone: z.string().regex(/^(\+91)?[6-9]\d{9}$/, 'Invalid Indian phone number').optional(),
-  password: z.string().min(8).max(128),
-}).refine(
-  (data) => data.email || data.phone,
-  { message: 'Either email or phone number is required' }
-);
+  email: z.string().email().max(255).toLowerCase().trim(),
+  phone: z.string().regex(/^(?:\+91)?[6-9]\d{9}$/).optional(),
+  password: z.string().min(12).max(128),
+}).strict();
+
+const GENERIC_RESPONSE = 'If this email can be registered, a verification message will be sent.';
+
+async function genericRegistrationResponse(startedAt: number) {
+  await waitForMinimumResponseTime(startedAt);
+  return apiSuccess({ message: GENERIC_RESPONSE }, 202);
+}
 
 export async function POST(request: NextRequest) {
+  if (!hasValidCsrfOrigin(request)) {
+    return apiError('CSRF_REJECTED', 'Request origin could not be verified', 403);
+  }
+
+  const startedAt = Date.now();
+  const ip = getRequestIp(request);
+  const ipLimit = await authRateLimiter.consume(`register:ip:${hashRateLimitKey(ip)}`, 10, 60 * 60 * 1000);
+  if (!ipLimit.allowed) return genericRegistrationResponse(startedAt);
+
+  let body: unknown;
   try {
-    const body = await request.json();
-    const parsed = registerSchema.safeParse(body);
+    body = await request.json();
+  } catch {
+    return apiError('VALIDATION_ERROR', 'Invalid registration data', 400);
+  }
 
-    if (!parsed.success) {
-      return apiError(
-        'VALIDATION_ERROR',
-        'Invalid registration data',
-        400,
-        parsed.error.flatten().fieldErrors
-      );
-    }
+  const parsed = registerSchema.safeParse(body);
+  if (!parsed.success) return apiError('VALIDATION_ERROR', 'Invalid registration data', 400);
 
-    const { name, email, phone, password } = parsed.data;
+  const { name, email, phone, password } = parsed.data;
+  if (!(await validatePasswordStrength(password))) {
+    return apiError('WEAK_PASSWORD', 'Choose a password that is not commonly used or known to be breached.', 400);
+  }
 
-    // Validate password strength
-    const isStrongPassword = validatePasswordStrength(password);
-    if (!isStrongPassword) {
-      return apiError('WEAK_PASSWORD', 'Password must be at least 8 characters with uppercase, lowercase, and a number', 400);
-    }
+  const emailLimit = await authRateLimiter.consume(
+    `register:email:${hashRateLimitKey(email)}`,
+    5,
+    60 * 60 * 1000,
+  );
+  if (!emailLimit.allowed) return genericRegistrationResponse(startedAt);
 
-    // Check for existing user
-    if (email) {
-      const existingEmail = await prisma.user.findUnique({ where: { email } });
-      if (existingEmail) {
-        return apiError('EMAIL_EXISTS', 'An account with this email already exists', 409);
-      }
-    }
+  const passwordHash = await hashPassword(password);
+  const existing = await prisma.user.findFirst({
+    where: { OR: [{ email }, ...(phone ? [{ phone: phone.startsWith('+') ? phone : `+91${phone}` }] : [])] },
+    select: { id: true },
+  });
+  if (existing) return genericRegistrationResponse(startedAt);
 
-    if (phone) {
-      const existingPhone = await prisma.user.findUnique({ where: { phone } });
-      if (existingPhone) {
-        return apiError('PHONE_EXISTS', 'An account with this phone number already exists', 409);
-      }
-    }
+  const normalizedPhone = phone ? (phone.startsWith('+') ? phone : `+91${phone}`) : undefined;
+  const rawToken = randomBytes(32).toString('base64url');
+  const tokenHash = createHash('sha256').update(rawToken).digest('hex');
 
-    // Hash password (bcrypt cost 12)
-    const passwordHash = await hashPassword(password);
-
-    // Create user
+  let userId: string;
+  try {
     const user = await prisma.user.create({
       data: {
         name,
         email,
-        phone,
-        passwordHash,
-        safetyScore: 100, // Start with full safety score
+        phone: normalizedPhone,
+        safetyScore: 100,
         scansToday: 0,
         totalScans: 0,
         failedAttempts: 0,
-      },
-    });
-
-    // Create session
-    const session = await createSession(user.id, request);
-
-    // Sign tokens
-    const accessToken = signAccessToken({
-      userId: user.id,
-      email: user.email || undefined,
-      sessionId: session.id,
-    });
-
-    const refreshToken = signRefreshToken({
-      userId: user.id,
-      sessionId: session.id,
-    });
-
-    // Store refresh token in DB
-    const refreshExpiry = new Date();
-    refreshExpiry.setDate(refreshExpiry.getDate() + 7); // 7 days
-
-    await prisma.refreshToken.create({
-      data: {
-        token: refreshToken,
-        userId: user.id,
-        expiresAt: refreshExpiry,
-      },
-    });
-
-    // Create auth audit log
-    await prisma.authAuditLog.create({
-      data: {
-        userId: user.id,
-        eventType: 'REGISTER',
-        ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown',
-        userAgent: request.headers.get('user-agent') || 'unknown',
-      },
-    });
-
-    // Set secure cookies and return response
-    const response = apiSuccess(
-      {
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          safetyScore: user.safetyScore,
-          mfaEnabled: user.mfaEnabled,
+        credential: { create: { passwordHash } },
+        emailTokens: {
+          create: {
+            tokenHash,
+            purpose: 'verify_email',
+            expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+          },
         },
       },
-      201
-    );
-
-    setAuthCookies(response, { accessToken, refreshToken });
-    return response;
+      select: { id: true },
+    });
+    userId = user.id;
   } catch (error) {
-    console.error('[Auth] Registration error:', error instanceof Error ? error.message : 'Unknown');
-    return apiError('INTERNAL_ERROR', 'Registration failed. Please try again.', 500);
+    if (error instanceof Error && 'code' in error && error.code === 'P2002') {
+      return genericRegistrationResponse(startedAt);
+    }
+    throw error;
   }
+
+  const verificationUrl = new URL('/verify-email', process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000');
+  verificationUrl.searchParams.set('token', rawToken);
+  scheduleAuthEmail({
+    to: email,
+    subject: 'Verify your CyberShield email',
+    actionUrl: verificationUrl.toString(),
+    purpose: 'verify_email',
+  });
+
+  await prisma.authAuditLog.create({
+    data: {
+      userId,
+      eventType: 'REGISTER',
+      ipAddress: ip,
+      userAgent: request.headers.get('user-agent') || undefined,
+    },
+  });
+
+  return genericRegistrationResponse(startedAt);
 }

@@ -10,64 +10,132 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum AuthRole {
+  GUARDIAN
+  CHILD
+  ADMIN
+
+  @@map("auth_role")
+}
+
 // ═══════════════════════════════════════════════════════════════
 // EXISTING TABLES — migrated 1:1 from SQLite
 // ═══════════════════════════════════════════════════════════════
 
 model User {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name           String
-  email          String?   @unique
-  phone          String?   @unique
-  passwordHash   String?   @map("password_hash")
-  mfaSecret      String?   @map("mfa_secret")
-  mfaEnabled     Boolean   @default(false) @map("mfa_enabled")
-  safetyScore    Int       @default(88) @map("safety_score")
-  scansToday     Int       @default(0) @map("scans_today")
-  totalScans     Int       @default(0) @map("total_scans")
-  failedAttempts Int       @default(0) @map("failed_attempts")
-  lockedUntil    DateTime? @map("locked_until")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime? @updatedAt @map("updated_at")
-  deletedAt      DateTime? @map("deleted_at")
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String
+  email           String?   @unique
+  emailVerifiedAt DateTime? @map("email_verified_at")
+  phone           String?   @unique
+  role            AuthRole  @default(CHILD)
+  passwordHash    String?   @map("password_hash")
+  mfaSecret       String?   @map("mfa_secret")
+  mfaEnabled      Boolean   @default(false) @map("mfa_enabled")
+  safetyScore     Int       @default(88) @map("safety_score")
+  scansToday      Int       @default(0) @map("scans_today")
+  totalScans      Int       @default(0) @map("total_scans")
+  failedAttempts  Int       @default(0) @map("failed_attempts")
+  lockedUntil     DateTime? @map("locked_until")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime? @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
 
   // Existing relations
   refreshTokens     RefreshToken[]
   authAuditLogs     AuthAuditLog[]
-  ownedFamilies     Family[]         @relation("FamilyOwner")
+  ownedFamilies     Family[]       @relation("FamilyOwner")
   familyMemberships FamilyMember[]
 
   // Guardian relations
-  guardianOf        GuardianRelationship[] @relation("GuardianOf")
-  guardedBy         GuardianRelationship[] @relation("GuardedBy")
-  safetySessions    SafetySession[]
-  sosEvents         SOSEvent[]
-  alertsReceived    AlertRecipient[]
-  guardianAlerts    GuardianAlert[]
-  guardianAuditLogs GuardianAuditLog[]     @relation("AuditGuardian")
-  userAuditLogs     GuardianAuditLog[]     @relation("AuditUser")
-  sessions          Session[]
+  guardianOf           GuardianRelationship[] @relation("GuardianOf")
+  guardedBy            GuardianRelationship[] @relation("GuardedBy")
+  safetySessions       SafetySession[]
+  sosEvents            SOSEvent[]
+  alertsReceived       AlertRecipient[]
+  guardianAlerts       GuardianAlert[]
+  guardianAuditLogs    GuardianAuditLog[]     @relation("AuditGuardian")
+  userAuditLogs        GuardianAuditLog[]     @relation("AuditUser")
+  sessions             Session[]
+  credential           Credential?
+  otpChallenges        OtpChallenge[]
+  emailTokens          EmailToken[]
+  mfaSecretRecord      MfaSecret?
+  recoveryCodes        RecoveryCode[]
+  aadhaarVerifications AadhaarVerification[]
+  consents             Consent[]
+  auditLogs            AuditLog[]
 
   @@index([createdAt])
   @@map("users")
 }
 
 model Otp {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   phone     String
-  codeHash  String   @map("code_hash")
-  expiresAt DateTime @map("expires_at")
-  attempts  Int      @default(0)
-  createdAt DateTime @default(now()) @map("created_at")
+  codeHash  String    @map("code_hash")
+  expiresAt DateTime  @map("expires_at")
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime? @updatedAt @map("updated_at")
 
   @@index([createdAt])
   @@map("otps")
 }
 
+model Credential {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String   @unique @map("user_id") @db.Uuid
+  passwordHash      String   @map("password_hash")
+  passwordUpdatedAt DateTime @default(now()) @map("password_updated_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@map("credentials")
+}
+
+model OtpChallenge {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String?   @map("user_id") @db.Uuid
+  phone       String
+  codeHash    String    @map("code_hash")
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5) @map("max_attempts")
+  sentAt      DateTime  @default(now()) @map("sent_at")
+  expiresAt   DateTime  @map("expires_at")
+  usedAt      DateTime? @map("used_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([phone, sentAt])
+  @@index([expiresAt])
+  @@index([userId, createdAt])
+  @@map("otp_challenges")
+}
+
+model EmailToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  purpose   String
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, expiresAt])
+  @@map("email_tokens")
+}
+
 model RefreshToken {
   token     String   @id
   userId    String   @map("user_id") @db.Uuid
+  sessionId String?  @map("session_id") @db.Uuid
   expiresAt DateTime @map("expires_at")
   revoked   Boolean  @default(false)
   createdAt DateTime @default(now()) @map("created_at")
@@ -80,13 +148,13 @@ model RefreshToken {
 }
 
 model AuthAuditLog {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String?  @map("user_id") @db.Uuid
-  eventType String   @map("event_type")
-  ipAddress String?  @map("ip_address")
-  userAgent String?  @map("user_agent")
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String?   @map("user_id") @db.Uuid
+  eventType String    @map("event_type")
+  ipAddress String?   @map("ip_address")
+  userAgent String?   @map("user_agent")
   location  String?
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime? @updatedAt @map("updated_at")
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -96,14 +164,97 @@ model AuthAuditLog {
   @@map("auth_audit_logs")
 }
 
+model MfaSecret {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String    @unique @map("user_id") @db.Uuid
+  encryptedSecret String    @map("encrypted_secret")
+  verifiedAt      DateTime? @map("verified_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("mfa_secrets")
+}
+
+model RecoveryCode {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @unique @map("code_hash")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+  @@map("recovery_codes")
+}
+
+model AadhaarVerification {
+  id                  String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId              String    @map("user_id") @db.Uuid
+  provider            String
+  providerReferenceId String    @unique @map("provider_reference_id")
+  status              String
+  verifiedAt          DateTime? @map("verified_at")
+  lastFourEncrypted   String?   @map("last_four_encrypted")
+  deletedAt           DateTime? @map("deleted_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("aadhaar_verifications")
+}
+
+model Consent {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  purpose     String
+  version     String
+  consentedAt DateTime  @default(now()) @map("consented_at")
+  withdrawnAt DateTime? @map("withdrawn_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, consentedAt])
+  @@map("consents")
+}
+
+model AuditLog {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  eventType String   @map("event_type")
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([eventType, createdAt])
+  @@map("audit_logs")
+}
+
+model AuthRateLimit {
+  key             String   @id
+  count           Int      @default(0)
+  windowStartedAt DateTime @default(now()) @map("window_started_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([windowStartedAt])
+  @@map("auth_rate_limits")
+}
+
 model SupportTicket {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name        String
-  contactInfo String   @map("contact_info")
+  contactInfo String    @map("contact_info")
   category    String
   message     String
-  status      String   @default("open")
-  createdAt   DateTime @default(now()) @map("created_at")
+  status      String    @default("open")
+  createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime? @updatedAt @map("updated_at")
 
   @@index([createdAt])
@@ -111,10 +262,10 @@ model SupportTicket {
 }
 
 model Family {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   name      String
-  ownerId   String   @map("owner_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
+  ownerId   String    @map("owner_id") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime? @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
@@ -128,19 +279,19 @@ model Family {
 }
 
 model FamilyMember {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId    String?  @map("user_id") @db.Uuid
-  familyId  String   @map("family_id") @db.Uuid
-  role      String   // guardian | adult | child | elderly
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String?   @map("user_id") @db.Uuid
+  familyId  String    @map("family_id") @db.Uuid
+  role      String // guardian | adult | child | elderly
   relation  String
-  riskScore Int      @default(0) @map("risk_score")
-  ageTier   String?  @map("age_tier")
-  createdAt DateTime @default(now()) @map("created_at")
+  riskScore Int       @default(0) @map("risk_score")
+  ageTier   String?   @map("age_tier")
+  createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime? @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
-  user              User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
-  family            Family             @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  user              User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  family            Family              @relation(fields: [familyId], references: [id], onDelete: Cascade)
   scanRecords       ScanRecord[]
   chatMessages      ChatMessage[]
   childProfile      ChildProfile?
@@ -158,22 +309,22 @@ model FamilyMember {
 }
 
 model ScanRecord {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  memberId        String   @map("member_id") @db.Uuid
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  memberId        String    @map("member_id") @db.Uuid
   type            String
   input           String
-  riskScore       Int      @map("risk_score")
-  riskLevel       String   @map("risk_level")
+  riskScore       Int       @map("risk_score")
+  riskLevel       String    @map("risk_level")
   category        String
   summary         String?
-  recommendations String?  @default("[]")
-  agentResults    String?  @default("[]") @map("agent_results")
-  createdAt       DateTime @default(now()) @map("created_at")
+  recommendations String?   @default("[]")
+  agentResults    String?   @default("[]") @map("agent_results")
+  createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime? @updatedAt @map("updated_at")
-  categoryId      String?  @map("category_id") @db.Uuid
+  categoryId      String?   @map("category_id") @db.Uuid
 
-  threatCategory  ThreatCategory? @relation("ScanCategory", fields: [categoryId], references: [id])
-  member          FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  threatCategory ThreatCategory? @relation("ScanCategory", fields: [categoryId], references: [id])
+  member         FamilyMember    @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId])
   @@index([categoryId])
@@ -182,15 +333,15 @@ model ScanRecord {
 }
 
 model FamilyAlert {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  familyId    String   @map("family_id") @db.Uuid
-  memberId    String   @map("member_id") @db.Uuid
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  familyId    String    @map("family_id") @db.Uuid
+  memberId    String    @map("member_id") @db.Uuid
   type        String
   severity    String
   title       String
   description String?
-  read        Boolean  @default(false)
-  createdAt   DateTime @default(now()) @map("created_at")
+  read        Boolean   @default(false)
+  createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime? @updatedAt @map("updated_at")
 
   family Family       @relation(fields: [familyId], references: [id], onDelete: Cascade)
@@ -203,17 +354,17 @@ model FamilyAlert {
 }
 
 model ChildProfile {
-  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  memberId         String   @unique @map("member_id") @db.Uuid
-  ageTier          String   @map("age_tier")
-  safetyScore      Int      @default(88) @map("safety_score")
-  alerts           Int      @default(0)
-  lastActive       DateTime @default(now()) @map("last_active")
-  riskLevel        String   @default("low") @map("risk_level")
-  screenTimeRules  String?    @map("screen_time_rules")
-  appUsage         String?    @map("app_usage")
-  deviceRestrictions String?  @map("device_restrictions")
-  updatedAt        DateTime? @updatedAt @map("updated_at")
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  memberId           String    @unique @map("member_id") @db.Uuid
+  ageTier            String    @map("age_tier")
+  safetyScore        Int       @default(88) @map("safety_score")
+  alerts             Int       @default(0)
+  lastActive         DateTime  @default(now()) @map("last_active")
+  riskLevel          String    @default("low") @map("risk_level")
+  screenTimeRules    String?   @map("screen_time_rules")
+  appUsage           String?   @map("app_usage")
+  deviceRestrictions String?   @map("device_restrictions")
+  updatedAt          DateTime? @updatedAt @map("updated_at")
 
   member            FamilyMember       @relation(fields: [memberId], references: [id], onDelete: Cascade)
   childSafetyAlerts ChildSafetyAlert[]
@@ -223,13 +374,13 @@ model ChildProfile {
 }
 
 model ChildSafetyAlert {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  childProfileId  String   @map("child_profile_id") @db.Uuid
-  memberId        String?  @map("member_id") @db.Uuid
-  patternType     String   @map("pattern_type")
-  severitySummary String   @map("severity_summary")
-  timestamp       DateTime @default(now())
-  parentNotified  Boolean  @default(false) @map("parent_notified")
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  childProfileId  String    @map("child_profile_id") @db.Uuid
+  memberId        String?   @map("member_id") @db.Uuid
+  patternType     String    @map("pattern_type")
+  severitySummary String    @map("severity_summary")
+  timestamp       DateTime  @default(now())
+  parentNotified  Boolean   @default(false) @map("parent_notified")
   updatedAt       DateTime? @updatedAt @map("updated_at")
 
   childProfile ChildProfile  @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
@@ -241,16 +392,16 @@ model ChildSafetyAlert {
 }
 
 model LocationShare {
-  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  memberId           String   @map("member_id") @db.Uuid
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  memberId           String    @map("member_id") @db.Uuid
   lat                Float
   lng                Float
-  sharedWith         String?  @map("shared_with")
-  isActive           Boolean  @default(true) @map("is_active")
-  journeyDestination String?  @map("journey_destination")
-  expectedArrival    String?  @map("expected_arrival")
-  expiresAt          DateTime @map("expires_at")
-  createdAt          DateTime @default(now()) @map("created_at")
+  sharedWith         String?   @map("shared_with")
+  isActive           Boolean   @default(true) @map("is_active")
+  journeyDestination String?   @map("journey_destination")
+  expectedArrival    String?   @map("expected_arrival")
+  expiresAt          DateTime  @map("expires_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime? @updatedAt @map("updated_at")
 
   member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
@@ -280,12 +431,12 @@ model Incident {
 }
 
 model ChatMessage {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  memberId  String?  @map("member_id") @db.Uuid
-  role      String   // user | assistant
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  memberId  String?   @map("member_id") @db.Uuid
+  role      String // user | assistant
   content   String
-  language  String   @default("en")
-  createdAt DateTime @default(now()) @map("created_at")
+  language  String    @default("en")
+  createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime? @updatedAt @map("updated_at")
 
   member FamilyMember? @relation(fields: [memberId], references: [id], onDelete: Cascade)
@@ -296,13 +447,13 @@ model ChatMessage {
 }
 
 model EmergencySosEvent {
-  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  memberId       String   @map("member_id") @db.Uuid
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  memberId       String    @map("member_id") @db.Uuid
   lat            Float?
   lng            Float?
-  locationStatus String?  @map("location_status")
-  smsStatus      String?  @map("sms_status")
-  createdAt      DateTime @default(now()) @map("created_at")
+  locationStatus String?   @map("location_status")
+  smsStatus      String?   @map("sms_status")
+  createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime? @updatedAt @map("updated_at")
 
   member FamilyMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
@@ -323,7 +474,7 @@ model GuardianRelationship {
   status      String    @default("PENDING") // PENDING | ACCEPTED | DECLINED | REVOKED
   inviteToken String?   @unique @map("invite_token")
   inviteEmail String?   @map("invite_email")
-  label       String?   // optional nickname ("Mom", "Best friend")
+  label       String? // optional nickname ("Mom", "Best friend")
   createdAt   DateTime  @default(now()) @map("created_at")
   acceptedAt  DateTime? @map("accepted_at")
   revokedAt   DateTime? @map("revoked_at")
@@ -357,9 +508,9 @@ model SafetySession {
   updatedAt        DateTime? @updatedAt @map("updated_at")
 
   // AI risk analysis
-  riskLevel        String?   @map("risk_level")
-  riskContext      String?   @map("risk_context")
-  adjustedInterval Int?      @map("adjusted_interval")
+  riskLevel        String? @map("risk_level")
+  riskContext      String? @map("risk_context")
+  adjustedInterval Int?    @map("adjusted_interval")
 
   user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   checkIns      CheckIn[]
@@ -375,7 +526,7 @@ model CheckIn {
   sessionId   String    @map("session_id") @db.Uuid
   promptedAt  DateTime  @default(now()) @map("prompted_at")
   respondedAt DateTime? @map("responded_at")
-  response    String?   // SAFE | EXTEND | SOS
+  response    String? // SAFE | EXTEND | SOS
   graceEndsAt DateTime  @map("grace_ends_at")
   updatedAt   DateTime? @updatedAt @map("updated_at")
 
@@ -404,25 +555,25 @@ model SOSEvent {
 }
 
 model GuardianAlert {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String   @map("user_id") @db.Uuid // user in danger
-  sessionId   String?  @map("session_id") @db.Uuid
-  sosEventId  String?  @unique @map("sos_event_id") @db.Uuid
-  type        String   // CHECK_IN_MISSED | SOS | SESSION_EXPIRED
-  status      String   @default("ACTIVE") // ACTIVE | ACKNOWLEDGED | RESOLVED | FALSE_ALARM
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid // user in danger
+  sessionId   String?   @map("session_id") @db.Uuid
+  sosEventId  String?   @unique @map("sos_event_id") @db.Uuid
+  type        String // CHECK_IN_MISSED | SOS | SESSION_EXPIRED
+  status      String    @default("ACTIVE") // ACTIVE | ACKNOWLEDGED | RESOLVED | FALSE_ALARM
   title       String
   description String?
   lat         Float?
   lng         Float?
-  createdAt   DateTime @default(now()) @map("created_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
   resolvedAt  DateTime? @map("resolved_at")
-  resolvedBy  String?  @map("resolved_by")
+  resolvedBy  String?   @map("resolved_by")
   updatedAt   DateTime? @updatedAt @map("updated_at")
 
-  session    SafetySession?  @relation(fields: [sessionId], references: [id], onDelete: SetNull)
-  sosEvent   SOSEvent?       @relation(fields: [sosEventId], references: [id], onDelete: SetNull)
+  session    SafetySession?   @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  sosEvent   SOSEvent?        @relation(fields: [sosEventId], references: [id], onDelete: SetNull)
   recipients AlertRecipient[]
-  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([sessionId])
@@ -438,7 +589,7 @@ model AlertRecipient {
   notifiedAt  DateTime  @default(now()) @map("notified_at")
   notifiedVia String    @default("[]") @map("notified_via") // stored as serialized JSON array of string (e.g. '["push"]')
   seenAt      DateTime? @map("seen_at")
-  response    String?   // got_this | escalate | false_alarm
+  response    String? // got_this | escalate | false_alarm
   respondedAt DateTime? @map("responded_at")
   updatedAt   DateTime? @updatedAt @map("updated_at")
 
@@ -452,12 +603,12 @@ model AlertRecipient {
 }
 
 model LocationPing {
-  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  sessionId String   @map("session_id") @db.Uuid
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId String    @map("session_id") @db.Uuid
   lat       Float
   lng       Float
   accuracy  Float?
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime? @updatedAt @map("updated_at")
 
   session SafetySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
@@ -468,14 +619,14 @@ model LocationPing {
 }
 
 model GuardianAuditLog {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  guardianId   String   @map("guardian_id") @db.Uuid
-  userId       String   @map("user_id") @db.Uuid
-  action       String   // viewed_session | viewed_location | responded_alert
-  resourceType String   @map("resource_type") // session | location | alert
-  resourceId   String   @map("resource_id")
-  ipAddress    String?  @map("ip_address")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  guardianId   String    @map("guardian_id") @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  action       String // viewed_session | viewed_location | responded_alert
+  resourceType String    @map("resource_type") // session | location | alert
+  resourceId   String    @map("resource_id")
+  ipAddress    String?   @map("ip_address")
+  createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime? @updatedAt @map("updated_at")
 
   guardian User @relation("AuditGuardian", fields: [guardianId], references: [id], onDelete: Cascade)
@@ -492,22 +643,22 @@ model GuardianAuditLog {
 // ═══════════════════════════════════════════════════════════════
 
 model ThreatCategory {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  slug        String   @unique
-  nameEn      String   @map("name_en")
-  nameHi      String?  @map("name_hi")
-  parentId    String?  @map("parent_id") @db.Uuid
-  severity    String   @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug        String    @unique
+  nameEn      String    @map("name_en")
+  nameHi      String?   @map("name_hi")
+  parentId    String?   @map("parent_id") @db.Uuid
+  severity    String    @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
   description String?
-  version     Int      @default(1)
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now()) @map("created_at")
+  version     Int       @default(1)
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime? @updatedAt @map("updated_at")
 
-  parent      ThreatCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
-  children    ThreatCategory[] @relation("CategoryHierarchy")
+  parent      ThreatCategory?   @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children    ThreatCategory[]  @relation("CategoryHierarchy")
   indicators  ThreatIndicator[]
-  scanResults ScanRecord[]     @relation("ScanCategory")
+  scanResults ScanRecord[]      @relation("ScanCategory")
 
   @@index([parentId])
   @@index([slug])
@@ -516,16 +667,16 @@ model ThreatCategory {
 }
 
 model ThreatIndicator {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  type         String    // domain, ip, pattern, keyword, url
-  value        String
-  categoryId   String?   @map("category_id") @db.Uuid
-  source       String    @default("manual") // manual, feed, community
-  confidence   Float     @default(0.5)
-  active       Boolean   @default(true)
-  expiresAt    DateTime? @map("expires_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime? @updatedAt @map("updated_at")
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  type       String // domain, ip, pattern, keyword, url
+  value      String
+  categoryId String?   @map("category_id") @db.Uuid
+  source     String    @default("manual") // manual, feed, community
+  confidence Float     @default(0.5)
+  active     Boolean   @default(true)
+  expiresAt  DateTime? @map("expires_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime? @updatedAt @map("updated_at")
 
   category ThreatCategory? @relation(fields: [categoryId], references: [id])
 
@@ -536,17 +687,17 @@ model ThreatIndicator {
 }
 
 model UrlAnalysis {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  url             String
-  domain          String?
-  tld             String?
-  hasSsl          Boolean? @map("has_ssl")
-  domainAgeDays   Int?     @map("domain_age_days")
-  redirectChain   String?  @map("redirect_chain") // JSON array
-  riskScore       Int      @default(0) @map("risk_score")
-  indicators      String?  // JSON array of detected indicators
-  ssrfBlocked     Boolean  @default(false) @map("ssrf_blocked")
-  analyzedAt      DateTime @default(now()) @map("analyzed_at")
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  url           String
+  domain        String?
+  tld           String?
+  hasSsl        Boolean? @map("has_ssl")
+  domainAgeDays Int?     @map("domain_age_days")
+  redirectChain String?  @map("redirect_chain") // JSON array
+  riskScore     Int      @default(0) @map("risk_score")
+  indicators    String? // JSON array of detected indicators
+  ssrfBlocked   Boolean  @default(false) @map("ssrf_blocked")
+  analyzedAt    DateTime @default(now()) @map("analyzed_at")
 
   qrScans QrScan[]
 
@@ -573,18 +724,18 @@ model QrScan {
 }
 
 model ModelRun {
-  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  provider      String   // gemini, openai, heuristic
-  model         String   // gemini-1.5-flash, gpt-4o-mini, etc.
-  promptHash    String   @map("prompt_hash") // SHA-256 of prompt (never store raw prompt)
-  tokensIn      Int?     @map("tokens_in")
-  tokensOut     Int?     @map("tokens_out")
-  latencyMs     Int?     @map("latency_ms")
-  costEstimate  Float?   @map("cost_estimate")
-  success       Boolean  @default(true)
-  error         String?
-  scanRecordId  String?  @map("scan_record_id") @db.Uuid
-  createdAt     DateTime @default(now()) @map("created_at")
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  provider     String // gemini, openai, heuristic
+  model        String // gemini-1.5-flash, gpt-4o-mini, etc.
+  promptHash   String   @map("prompt_hash") // SHA-256 of prompt (never store raw prompt)
+  tokensIn     Int?     @map("tokens_in")
+  tokensOut    Int?     @map("tokens_out")
+  latencyMs    Int?     @map("latency_ms")
+  costEstimate Float?   @map("cost_estimate")
+  success      Boolean  @default(true)
+  error        String?
+  scanRecordId String?  @map("scan_record_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at")
 
   @@index([provider])
   @@index([createdAt])
@@ -595,7 +746,7 @@ model ModelRun {
 model ModelFeedback {
   id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   scanRecordId String   @map("scan_record_id") @db.Uuid
-  feedback     String   // accurate, false_positive, false_negative
+  feedback     String // accurate, false_positive, false_negative
   userComment  String?  @map("user_comment")
   createdAt    DateTime @default(now()) @map("created_at")
 
@@ -616,14 +767,14 @@ model FeatureFlag {
 }
 
 model EmergencyContact {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId       String   @map("user_id") @db.Uuid
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
   name         String
   phone        String
   relationship String?
-  priority     Int      @default(0)
-  isVerified   Boolean  @default(false) @map("is_verified")
-  createdAt    DateTime @default(now()) @map("created_at")
+  priority     Int       @default(0)
+  isVerified   Boolean   @default(false) @map("is_verified")
+  createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime? @updatedAt @map("updated_at")
 
   @@index([userId])
@@ -634,8 +785,8 @@ model EmergencyContact {
 model NotificationPreference {
   id       String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId   String  @map("user_id") @db.Uuid
-  channel  String  // push, sms, email
-  category String  // security_alert, family_alert, scan_result, system
+  channel  String // push, sms, email
+  category String // security_alert, family_alert, scan_result, system
   enabled  Boolean @default(true)
 
   @@unique([userId, channel, category])
@@ -656,20 +807,20 @@ model AdminUser {
   updatedAt    DateTime? @updatedAt @map("updated_at")
 
   auditLogs AdminAuditLog[]
-  
+
   @@index([createdAt])
   @@map("admin_users")
 }
 
 model AdminAuditLog {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  adminId     String   @map("admin_id") @db.Uuid
-  action      String   // login, view_user, modify_config, etc.
-  resource    String?  // resource type affected
-  resourceId  String?  @map("resource_id")
-  details     String?  // JSON details
-  ipAddress   String?  @map("ip_address")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminId    String   @map("admin_id") @db.Uuid
+  action     String // login, view_user, modify_config, etc.
+  resource   String? // resource type affected
+  resourceId String?  @map("resource_id")
+  details    String? // JSON details
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
 
   admin AdminUser @relation(fields: [adminId], references: [id])
 
@@ -679,13 +830,13 @@ model AdminAuditLog {
 }
 
 model SecurityEvent {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  eventType  String   @map("event_type") // auth_attack, rate_limit_hit, ssrf_blocked, etc.
-  severity   String   // info, warning, error, critical
-  sourceIp   String?  @map("source_ip")
-  userId     String?  @map("user_id") @db.Uuid
-  details    String?  // JSON details
-  createdAt  DateTime @default(now()) @map("created_at")
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventType String   @map("event_type") // auth_attack, rate_limit_hit, ssrf_blocked, etc.
+  severity  String // info, warning, error, critical
+  sourceIp  String?  @map("source_ip")
+  userId    String?  @map("user_id") @db.Uuid
+  details   String? // JSON details
+  createdAt DateTime @default(now()) @map("created_at")
 
   @@index([eventType])
   @@index([severity])
@@ -698,7 +849,7 @@ model SystemMetric {
   id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   metricKey  String   @map("metric_key") // total_scans, threats_detected, etc.
   value      Float
-  period     String   // hourly, daily, weekly, monthly
+  period     String // hourly, daily, weekly, monthly
   recordedAt DateTime @map("recorded_at")
 
   @@index([metricKey, period])
@@ -707,14 +858,15 @@ model SystemMetric {
 }
 
 model Session {
-  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId       String   @map("user_id") @db.Uuid
-  token        String   @unique
-  ipAddress    String?  @map("ip_address")
-  userAgent    String?  @map("user_agent")
-  lastActiveAt DateTime @default(now()) @map("last_active_at")
-  expiresAt    DateTime @map("expires_at")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  token        String    @unique
+  ipAddress    String?   @map("ip_address")
+  userAgent    String?   @map("user_agent")
+  lastActiveAt DateTime  @default(now()) @map("last_active_at")
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime? @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

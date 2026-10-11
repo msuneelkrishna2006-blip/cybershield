@@ -6,24 +6,25 @@
  */
 
 import { prisma } from '@/lib/prisma';
+import { getRequestIp } from './rate-limit';
 import { NextRequest } from 'next/server';
-import { randomUUID } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 
 /**
  * Creates a new session in the database.
  * Returns the full session object.
  */
 export async function createSession(userId: string, request: NextRequest) {
-  const ipAddress = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown';
+  const ipAddress = getRequestIp(request);
   const userAgent = request.headers.get('user-agent') || 'unknown';
 
-  // Expiry aligned with refresh token (7 days)
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const sessionSecret = randomBytes(32).toString('base64url');
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
   const session = await prisma.session.create({
     data: {
       userId,
-      token: randomUUID(),
+      token: createHash('sha256').update(sessionSecret).digest('hex'),
       ipAddress,
       userAgent,
       lastActiveAt: new Date(),
@@ -31,21 +32,31 @@ export async function createSession(userId: string, request: NextRequest) {
     },
   });
 
-  return session;
+  return { ...session, sessionSecret };
 }
 
 /**
  * Validates a session and updates its last active time.
  * Returns true if session is valid, false otherwise.
  */
-export async function validateSession(sessionId: string): Promise<boolean> {
+export async function validateSession(sessionId: string, sessionSecret: string): Promise<boolean> {
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
   });
 
   if (!session) return false;
 
-  if (new Date() > session.expiresAt) {
+  const now = new Date();
+  const idleExpiry = new Date(session.lastActiveAt.getTime() + 24 * 60 * 60 * 1000);
+  const suppliedHash = createHash('sha256').update(sessionSecret).digest();
+  const storedHash = Buffer.from(session.token, 'hex');
+  if (
+    session.revokedAt
+    || now > session.expiresAt
+    || now > idleExpiry
+    || suppliedHash.length !== storedHash.length
+    || !timingSafeEqual(suppliedHash, storedHash)
+  ) {
     await revokeSession(sessionId);
     return false;
   }
@@ -65,18 +76,38 @@ export async function validateSession(sessionId: string): Promise<boolean> {
 export async function revokeSession(sessionId: string): Promise<void> {
   await prisma.session.update({
     where: { id: sessionId },
-    data: { expiresAt: new Date() },
+    data: { revokedAt: new Date() },
   });
 }
 
 /**
  * Revokes all sessions for a given user.
  */
-export async function revokeAllUserSessions(userId: string): Promise<void> {
+export async function revokeAllUserSessions(userId: string, exceptSessionId?: string): Promise<void> {
   await prisma.session.updateMany({
-    where: { userId },
-    data: { expiresAt: new Date() },
+    where: {
+      userId,
+      revokedAt: null,
+      ...(exceptSessionId ? { id: { not: exceptSessionId } } : {}),
+    },
+    data: { revokedAt: new Date() },
   });
+}
+
+export async function consumeRefreshToken(
+  token: string,
+  userId: string,
+  sessionId: string,
+): Promise<boolean> {
+  const result = await prisma.refreshToken.updateMany({
+    where: { token: hashRefreshToken(token), userId, sessionId, revoked: false },
+    data: { revoked: true },
+  });
+  return result.count === 1;
+}
+
+export function hashRefreshToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }
 
 /**
@@ -88,6 +119,7 @@ export async function listUserSessions(userId: string) {
     where: {
       userId,
       expiresAt: { gt: now },
+      revokedAt: null,
     },
     orderBy: { lastActiveAt: 'desc' },
     select: {

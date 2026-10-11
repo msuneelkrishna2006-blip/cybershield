@@ -23,6 +23,7 @@
   "dependencies": {
     "@ai-sdk/google": "^4.0.12",
     "@ai-sdk/react": "^4.0.23",
+    "@node-rs/argon2": "^2.2.2",
     "@prisma/client": "^5.22.0",
     "ai": "^7.0.22",
     "bcryptjs": "^3.0.3",

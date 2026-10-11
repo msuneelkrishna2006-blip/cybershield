@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { ShieldLogo, Spinner } from '@/components/ui'
@@ -22,24 +22,8 @@ export default function RegisterPage() {
   const [isLoading, setIsLoading] = useState(false)
 
   // Password strength checks
-  const [checks, setChecks] = useState({
-    length: false,
-    number: false,
-    letter: false,
-    special: false
-  })
-
-  useEffect(() => {
-    const pwd = formData.password
-    setChecks({
-      length: pwd.length >= 8,
-      number: /\d/.test(pwd),
-      letter: /[A-Za-z]/.test(pwd),
-      special: /[@$!%*?&]/.test(pwd)
-    })
-  }, [formData.password])
-
-  const allChecksPassed = checks.length && checks.number && checks.letter && checks.special
+  const passwordLengthValid = formData.password.length >= 12 && formData.password.length <= 128
+  const allChecksPassed = passwordLengthValid
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value })
@@ -158,6 +142,8 @@ export default function RegisterPage() {
                 value={formData.password}
                 onChange={handleChange}
                 required
+                minLength={12}
+                maxLength={128}
                 className="input pl-12"
                 placeholder="••••••••"
               />
@@ -169,20 +155,10 @@ export default function RegisterPage() {
                 <p className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
                   <ShieldAlert size={14} className="text-purple-400" /> {t('passwordGuidelines')}
                 </p>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                  <span className={`flex items-center gap-1.5 ${checks.length ? 'text-emerald-400' : 'text-slate-500'}`}>
-                    {checks.length ? <Check size={12} /> : <X size={12} />} {t('atLeast8Chars')}
-                  </span>
-                  <span className={`flex items-center gap-1.5 ${checks.letter ? 'text-emerald-400' : 'text-slate-500'}`}>
-                    {checks.letter ? <Check size={12} /> : <X size={12} />} {t('containsLetters')}
-                  </span>
-                  <span className={`flex items-center gap-1.5 ${checks.number ? 'text-emerald-400' : 'text-slate-500'}`}>
-                    {checks.number ? <Check size={12} /> : <X size={12} />} {t('containsNumbers')}
-                  </span>
-                  <span className={`flex items-center gap-1.5 ${checks.special ? 'text-emerald-400' : 'text-slate-500'}`}>
-                    {checks.special ? <Check size={12} /> : <X size={12} />} {t('specialSymbol')}
-                  </span>
-                </div>
+                <span className={`flex items-center gap-1.5 text-xs ${passwordLengthValid ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {passwordLengthValid ? <Check size={12} /> : <X size={12} />}
+                  Use 12–128 characters; composition rules are not required.
+                </span>
               </div>
             )}
           </div>
@@ -197,6 +173,8 @@ export default function RegisterPage() {
                 value={formData.confirmPassword}
                 onChange={handleChange}
                 required
+                minLength={12}
+                maxLength={128}
                 className="input pl-12"
                 placeholder="••••••••"
               />

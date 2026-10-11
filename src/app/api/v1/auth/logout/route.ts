@@ -13,24 +13,26 @@ import { verifyAccessToken } from '@/lib/auth/jwt';
 import { revokeSession } from '@/lib/auth/session';
 import { clearAuthCookies } from '@/lib/auth/cookies';
 import { apiSuccess, apiError } from '@/lib/api/response';
+import { hasValidCsrfOrigin } from '@/lib/auth/csrf';
+import { getRequestIp } from '@/lib/auth/rate-limit';
 
 export async function POST(request: NextRequest) {
+  if (!hasValidCsrfOrigin(request)) {
+    return apiError('CSRF_REJECTED', 'Request origin could not be verified', 403);
+  }
   try {
     const token = getAccessToken(request);
 
     if (token) {
       try {
-        const payload = verifyAccessToken(token);
+        const payload = await verifyAccessToken(token);
 
         // Revoke the current session
         await revokeSession(payload.sessionId);
 
         // Revoke the refresh token
         await prisma.refreshToken.updateMany({
-          where: {
-            userId: payload.userId,
-            revoked: false,
-          },
+          where: { userId: payload.userId, sessionId: payload.sessionId, revoked: false },
           data: { revoked: true },
         });
 
@@ -39,7 +41,7 @@ export async function POST(request: NextRequest) {
           data: {
             userId: payload.userId,
             eventType: 'LOGOUT',
-            ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+            ipAddress: getRequestIp(request),
             userAgent: request.headers.get('user-agent') || 'unknown',
           },
         });

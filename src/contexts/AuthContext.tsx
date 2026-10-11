@@ -16,6 +16,10 @@ interface AuthContextType {
   verifyOtp: (phone: string, code: string) => Promise<void>
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -30,7 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (res.ok) {
         const json = await res.json()
         if (json.success && json.data) {
-          setUser(json.data)
+          setUser(json.data.user)
         } else {
           setUser(null)
         }
@@ -98,8 +102,8 @@ useEffect(() => {
       await loadProfile()
       toast.success('Successfully logged in!')
       router.push('/app')
-    } catch (error: any) {
-      toast.error(error.message)
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, 'Login failed'))
       throw error
     } finally {
       setIsLoading(false)
@@ -116,7 +120,7 @@ useEffect(() => {
         body: JSON.stringify({
   name: name.trim(),
   email: email.trim(),
-  phone: phone.replace(/\s+/g, ''),
+  ...(phone.trim() ? { phone: phone.replace(/\s+/g, '') } : {}),
   password: pass,
 })
       })
@@ -126,11 +130,10 @@ useEffect(() => {
         throw new Error(data.error?.message || data.error || 'Registration failed')
       }
 
-      await loadProfile()
-      toast.success('Account created and logged in successfully!')
-      router.push('/app')
-    } catch (error: any) {
-      toast.error(error.message)
+      toast.success(data.data?.message || 'Account created. Check your email to verify it before signing in.')
+      router.push('/login')
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, 'Registration failed'))
       throw error
     } finally {
       setIsLoading(false)
@@ -143,7 +146,7 @@ useEffect(() => {
       setUser(null)
       toast.success('Logged out successfully')
       router.push('/login')
-    } catch (error) {
+    } catch {
       toast.error('Logout error')
     }
   }
@@ -167,8 +170,8 @@ useEffect(() => {
 
       toast.success(data.message)
       return data
-    } catch (error: any) {
-      toast.error(error.message)
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, 'Failed to dispatch OTP'))
       throw error
     }
   }
@@ -191,8 +194,8 @@ useEffect(() => {
       await loadProfile()
       toast.success('Successfully logged in!')
       router.push('/app')
-    } catch (error: any) {
-      toast.error(error.message)
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, 'OTP verification failed'))
       throw error
     } finally {
       setIsLoading(false)

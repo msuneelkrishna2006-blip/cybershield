@@ -1,75 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAuthConfig } from './config';
+import { hasValidCsrfOrigin } from './csrf';
 
 interface Tokens {
   accessToken: string;
   refreshToken: string;
 }
 
-/**
- * Sets secure HTTP-only cookies for authentication
- */
-export function setAuthCookies(response: NextResponse, { accessToken, refreshToken }: Tokens) {
+export function setAuthCookies(response: NextResponse, tokens: Tokens): NextResponse {
   const config = getAuthConfig();
-  const isProduction = process.env.NODE_ENV === 'production';
-  
-  response.cookies.set(config.SESSION_COOKIE_NAME, accessToken, {
+  response.cookies.set(config.SESSION_COOKIE_NAME, tokens.accessToken, {
     httpOnly: true,
-    secure: isProduction,
-    sameSite: 'strict',
-    path: '/api',
-    maxAge: 15 * 60, // 15 minutes
+    secure: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 15 * 60,
   });
 
-  response.cookies.set(config.REFRESH_COOKIE_NAME, refreshToken, {
+  response.cookies.set(config.REFRESH_COOKIE_NAME, tokens.refreshToken, {
     httpOnly: true,
-    secure: isProduction,
+    secure: true,
     sameSite: 'strict',
-    path: '/api/v1/auth/refresh',
-    maxAge: 7 * 24 * 60 * 60, // 7 days
+    path: '/',
+    maxAge: 7 * 24 * 60 * 60,
   });
-  
+
   return response;
 }
 
-/**
- * Clears the authentication cookies
- */
-export function clearAuthCookies(response: NextResponse) {
+export function clearAuthCookies(response: NextResponse): NextResponse {
   const config = getAuthConfig();
-  const isProduction = process.env.NODE_ENV === 'production';
-
-  response.cookies.set(config.SESSION_COOKIE_NAME, '', {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: 'strict',
-    path: '/api',
-    maxAge: 0,
-  });
-
-  response.cookies.set(config.REFRESH_COOKIE_NAME, '', {
-    httpOnly: true,
-    secure: isProduction,
-    sameSite: 'strict',
-    path: '/api/v1/auth/refresh',
-    maxAge: 0,
-  });
-  
+  for (const name of [config.SESSION_COOKIE_NAME, config.REFRESH_COOKIE_NAME]) {
+    response.cookies.set(name, '', {
+      httpOnly: true,
+      secure: true,
+      sameSite: name === config.REFRESH_COOKIE_NAME ? 'strict' : 'lax',
+      path: '/',
+      maxAge: 0,
+    });
+  }
   return response;
 }
 
-/**
- * Retrieves the access token from cookies
- */
 export function getAccessToken(request: NextRequest): string | undefined {
-  const config = getAuthConfig();
-  return request.cookies.get(config.SESSION_COOKIE_NAME)?.value;
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !hasValidCsrfOrigin(request)) {
+    return undefined;
+  }
+  return request.cookies.get(getAuthConfig().SESSION_COOKIE_NAME)?.value;
 }
 
-/**
- * Retrieves the refresh token from cookies
- */
 export function getRefreshToken(request: NextRequest): string | undefined {
-  const config = getAuthConfig();
-  return request.cookies.get(config.REFRESH_COOKIE_NAME)?.value;
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && !hasValidCsrfOrigin(request)) {
+    return undefined;
+  }
+  return request.cookies.get(getAuthConfig().REFRESH_COOKIE_NAME)?.value;
 }
