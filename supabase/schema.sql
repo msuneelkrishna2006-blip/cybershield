@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS public.sessions (
     ip_address INET,
     user_agent TEXT,
     last_active_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_reauth_at TIMESTAMP WITH TIME ZONE,
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
     revoked_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
@@ -63,9 +64,27 @@ CREATE TABLE IF NOT EXISTS public.mfa_secrets (
     user_id UUID NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
     encrypted_secret TEXT NOT NULL,
     verified_at TIMESTAMP WITH TIME ZONE,
+    last_used_step INTEGER NOT NULL DEFAULT -1,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS public.pending_mfa_challenges (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    device_hash TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+    max_attempts INTEGER NOT NULL DEFAULT 5 CHECK (max_attempts > 0),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.sessions
+    ADD COLUMN IF NOT EXISTS last_reauth_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE public.mfa_secrets
+    ADD COLUMN IF NOT EXISTS last_used_step INTEGER NOT NULL DEFAULT -1;
 
 CREATE TABLE IF NOT EXISTS public.recovery_codes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -142,6 +161,7 @@ ALTER TABLE public.credentials ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.otp_challenges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.email_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pending_mfa_challenges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.mfa_secrets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recovery_codes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.aadhaar_verifications ENABLE ROW LEVEL SECURITY;
@@ -158,6 +178,8 @@ CREATE POLICY "No client access to OTP challenges" ON public.otp_challenges
 CREATE POLICY "No client access to email tokens" ON public.email_tokens
     FOR ALL TO authenticated USING (false) WITH CHECK (false);
 CREATE POLICY "No client access to sessions" ON public.sessions
+    FOR ALL TO authenticated USING (false) WITH CHECK (false);
+CREATE POLICY "No client access to pending MFA challenges" ON public.pending_mfa_challenges
     FOR ALL TO authenticated USING (false) WITH CHECK (false);
 CREATE POLICY "No client access to MFA secrets" ON public.mfa_secrets
     FOR ALL TO authenticated USING (false) WITH CHECK (false);

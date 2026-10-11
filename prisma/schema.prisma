@@ -27,11 +27,10 @@ model User {
   name            String
   email           String?   @unique
   emailVerifiedAt DateTime? @map("email_verified_at")
-  phone           String?   @unique
+  phone           String?
   phoneVerifiedAt DateTime? @map("phone_verified_at")
   role            AuthRole  @default(CHILD)
   passwordHash    String?   @map("password_hash")
-  mfaSecret       String?   @map("mfa_secret")
   mfaEnabled      Boolean   @default(false) @map("mfa_enabled")
   safetyScore     Int       @default(88) @map("safety_score")
   scansToday      Int       @default(0) @map("scans_today")
@@ -63,12 +62,14 @@ model User {
   emailTokens          EmailToken[]
   mfaSecretRecord      MfaSecret?
   recoveryCodes        RecoveryCode[]
+  pendingMfaChallenges PendingMfaChallenge[]
   aadhaarVerifications AadhaarVerification[]
   consents             Consent[]
   auditLogs            AuditLog[]
 
   @@index([createdAt])
   @@map("users")
+  @@index([phone], map: "users_phone_idx")
 }
 
 model Otp {
@@ -171,6 +172,7 @@ model MfaSecret {
   userId          String    @unique @map("user_id") @db.Uuid
   encryptedSecret String    @map("encrypted_secret")
   verifiedAt      DateTime? @map("verified_at")
+  lastUsedStep    Int       @default(-1) @map("last_used_step")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -190,6 +192,23 @@ model RecoveryCode {
 
   @@index([userId, usedAt])
   @@map("recovery_codes")
+}
+
+model PendingMfaChallenge {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tokenHash   String    @unique @map("token_hash")
+  deviceHash  String    @map("device_hash")
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5) @map("max_attempts")
+  expiresAt   DateTime  @map("expires_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("pending_mfa_challenges")
 }
 
 model AadhaarVerification {
@@ -866,6 +885,7 @@ model Session {
   ipAddress    String?   @map("ip_address")
   userAgent    String?   @map("user_agent")
   lastActiveAt DateTime  @default(now()) @map("last_active_at")
+  lastReauthAt DateTime? @map("last_reauth_at")
   expiresAt    DateTime  @map("expires_at")
   revokedAt    DateTime? @map("revoked_at")
   createdAt    DateTime  @default(now()) @map("created_at")
