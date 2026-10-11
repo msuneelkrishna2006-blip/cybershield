@@ -20,6 +20,10 @@ export default function SettingsPage() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
+  const [phoneVerified, setPhoneVerified] = useState(false)
+  const [phoneOtpSent, setPhoneOtpSent] = useState(false)
+  const [phoneOtp, setPhoneOtp] = useState('')
+  const [phoneOtpLoading, setPhoneOtpLoading] = useState(false)
   
   // Notification states
   const [notifScam, setNotifScam] = useState(true)
