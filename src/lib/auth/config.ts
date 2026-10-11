@@ -15,6 +15,10 @@ const authEnvironmentSchema = z.object({
   EMAIL_PROVIDER: z.enum(['mock', 'resend']).optional(),
   RESEND_API_KEY: z.string().optional(),
   AUTH_EMAIL_FROM: z.string().min(3).optional(),
+  SMS_PROVIDER: z.enum(['mock', 'twilio']).optional(),
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_FROM_NUMBER: z.string().optional(),
 }).superRefine((env, context) => {
   if (env.NODE_ENV === 'production') {
     for (const key of ['JWT_SECRET', 'JWT_REFRESH_SECRET'] as const) {
@@ -44,6 +48,19 @@ const authEnvironmentSchema = z.object({
         message: 'Production email delivery requires EMAIL_PROVIDER=resend, RESEND_API_KEY, and AUTH_EMAIL_FROM',
       });
     }
+
+    if (
+      env.SMS_PROVIDER !== 'twilio'
+      || !env.TWILIO_ACCOUNT_SID
+      || !env.TWILIO_AUTH_TOKEN
+      || !env.TWILIO_FROM_NUMBER
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SMS_PROVIDER'],
+        message: 'Production SMS delivery requires Twilio credentials and a sender number',
+      });
+    }
   }
 });
 
@@ -66,6 +83,10 @@ function createConfig() {
     EMAIL_PROVIDER: env.EMAIL_PROVIDER || (env.NODE_ENV === 'production' ? undefined : 'mock'),
     RESEND_API_KEY: env.RESEND_API_KEY,
     AUTH_EMAIL_FROM: env.AUTH_EMAIL_FROM,
+    SMS_PROVIDER: env.SMS_PROVIDER || (env.NODE_ENV === 'production' ? undefined : 'mock'),
+    TWILIO_ACCOUNT_SID: env.TWILIO_ACCOUNT_SID,
+    TWILIO_AUTH_TOKEN: env.TWILIO_AUTH_TOKEN,
+    TWILIO_FROM_NUMBER: env.TWILIO_FROM_NUMBER,
     ACCESS_TOKEN_EXPIRY: '15m',
     REFRESH_TOKEN_EXPIRY: '7d',
     SESSION_COOKIE_NAME: '__Host-cs_session',

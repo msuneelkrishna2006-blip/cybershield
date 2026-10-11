@@ -28,6 +28,7 @@ model User {
   email           String?   @unique
   emailVerifiedAt DateTime? @map("email_verified_at")
   phone           String?   @unique
+  phoneVerifiedAt DateTime? @map("phone_verified_at")
   role            AuthRole  @default(CHILD)
   passwordHash    String?   @map("password_hash")
   mfaSecret       String?   @map("mfa_secret")
@@ -102,6 +103,7 @@ model OtpChallenge {
   userId      String?   @map("user_id") @db.Uuid
   phone       String
   codeHash    String    @map("code_hash")
+  purpose     String    @default("login")
   attempts    Int       @default(0)
   maxAttempts Int       @default(5) @map("max_attempts")
   sentAt      DateTime  @default(now()) @map("sent_at")

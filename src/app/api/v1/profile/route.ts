@@ -6,9 +6,12 @@
 
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { getAccessToken } from '@/lib/auth/cookies';
+import { hasValidCsrfOrigin } from '@/lib/auth/csrf';
+import { normalizeIndianPhoneNumber } from '@/lib/auth/otp';
 import { apiSuccess, apiError } from '@/lib/api/response';
 
 const updateProfileSchema = z.object({
@@ -24,7 +27,7 @@ export async function GET(request: NextRequest) {
 
     let payload;
     try {
-      payload = verifyAccessToken(token);
+      payload = await verifyAccessToken(token);
     } catch {
       return apiError('UNAUTHORIZED', 'Invalid or expired token', 401);
     }

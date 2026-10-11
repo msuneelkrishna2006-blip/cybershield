@@ -6,8 +6,7 @@ import { motion } from 'framer-motion'
 import { ShieldLogo, Spinner } from '@/components/ui'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTranslation } from '@/contexts/TranslationContext'
-import { ArrowRight, Mail, Lock, Phone, ShieldCheck, AlertCircle, Info } from 'lucide-react'
-import ReCAPTCHA from 'react-google-recaptcha'
+import { ArrowRight, Mail, Lock, Phone, ShieldCheck, AlertCircle } from 'lucide-react'
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
@@ -28,11 +27,7 @@ export default function LoginPage() {
   // Mobile form states
   const [phone, setPhone] = useState('')
   const [otpSent, setOtpSent] = useState(false)
-  const [devOtpCode, setDevOtpCode] = useState('') // Helper for local testing
   const [otpLoading, setOtpLoading] = useState(false)
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
-  const recaptchaRef = useRef<ReCAPTCHA | null>(null)
-  const captchaTokenRef = useRef<string | null>(null) // Mirror of captchaToken for use in closures
 
   // 6-digit OTP states
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', ''])
@@ -41,7 +36,7 @@ export default function LoginPage() {
   const [isSuccess, setIsSuccess] = useState(false)
 
   // Resend and lockout states
-  const [timer, setTimer] = useState(30)
+  const [timer, setTimer] = useState(60)
   const [resendCount, setResendCount] = useState(0)
   const [resendLocked, setResendLocked] = useState(false)
   const [resendLockoutTimer, setResendLockoutTimer] = useState(0)
@@ -49,24 +44,6 @@ export default function LoginPage() {
   const [lockoutTimer, setLockoutTimer] = useState(0)
 
   const otpRefs = useRef<(HTMLInputElement | null)[]>(Array(6).fill(null))
-
-  // Keep captchaTokenRef in sync with state
-  useEffect(() => {
-    captchaTokenRef.current = captchaToken
-  }, [captchaToken])
-
-  // Helper: reset reCAPTCHA widget and clear token
-  const resetCaptcha = () => {
-    setCaptchaToken(null)
-    captchaTokenRef.current = null
-    try {
-      if (recaptchaRef.current) {
-        recaptchaRef.current.reset()
-      }
-    } catch (err) {
-      console.error('reCAPTCHA reset error', err)
-    }
-  }
 
   // Resend Countdown
   useEffect(() => {
@@ -268,11 +245,8 @@ export default function LoginPage() {
     try {
       // Pass null captcha for resend — the server allows resends
       // from the same session within the rate limit window
-      const data = await sendOtp(formattedPhone, null)
-      setTimer(30) // Reset 30s countdown
-      if (data && data.devOtp) {
-        setDevOtpCode(data.devOtp)
-      }
+      await sendOtp(formattedPhone)
+      setTimer(60)
       setTimeout(() => {
         otpRefs.current[0]?.focus()
       }, 50)
@@ -294,7 +268,6 @@ export default function LoginPage() {
   const handleChangeNumber = () => {
     setOtpSent(false)
     setPhone('')
-    setDevOtpCode('')
     setOtpDigits(['', '', '', '', '', ''])
     setErrorText('')
     setFailedAttempts(0)
@@ -351,37 +324,16 @@ export default function LoginPage() {
       return
     }
 
-    if (!captchaToken) {
-      setErrorText(t('captchaRequired'))
-      return
-    }
-
-    // Capture the token and immediately clear it to prevent reuse
-    const tokenToSend = captchaToken
-    setCaptchaToken(null)
-    captchaTokenRef.current = null
-    
     const formattedPhone = '+91' + phoneBase
 
     setOtpLoading(true)
     setErrorText('')
     try {
-      const data = await sendOtp(formattedPhone, tokenToSend)
+      await sendOtp(formattedPhone)
       setOtpSent(true)
-      setTimer(30) // Start the 30-second resend cooldown
-      if (data && data.devOtp) {
-        setDevOtpCode(data.devOtp)
-      }
+      setTimer(60)
     } catch (error: unknown) {
-      const errorMsg = getErrorMessage(error, 'Failed to dispatch verification code')
-      // Detect expired/invalid token errors and show a clear message
-      if (errorMsg.includes('invalid-input-response') || errorMsg.includes('already-seen')) {
-        setErrorText(t('captchaExpired'))
-      } else {
-        setErrorText(errorMsg)
-      }
-      // Reset the widget so user can re-solve
-      resetCaptcha()
+      setErrorText(getErrorMessage(error, 'Failed to dispatch verification code'))
     } finally {
       setOtpLoading(false)
     }
@@ -503,24 +455,6 @@ export default function LoginPage() {
                       <p className="text-xs text-slate-500 ml-1">{t('mobileHint')}</p>
                     </div>
 
-                    {/* Google reCAPTCHA Bot Gating Check */}
-                    <div className="flex justify-center my-4">
-                      <ReCAPTCHA
-                        ref={recaptchaRef}
-                        sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || '6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI'}
-                        theme="dark"
-                        onChange={(token) => {
-                          setCaptchaToken(token)
-                          captchaTokenRef.current = token
-                        }}
-                        onExpired={() => {
-                          setCaptchaToken(null)
-                          captchaTokenRef.current = null
-                          setErrorText(t('captchaExpired'))
-                        }}
-                      />
-                    </div>
-
                     <button 
                       type="submit" 
                       disabled={otpLoading || phone.length < 10}
@@ -576,13 +510,6 @@ export default function LoginPage() {
                           </div>
                         )}
 
-                        {/* Sandbox OTP hint (non-production builds only) */}
-                        {process.env.NODE_ENV !== 'production' && devOtpCode && (
-                          <div className="mt-2 bg-cyan-950/40 border border-cyan-500/20 p-3 rounded-xl flex items-center gap-2 text-xs text-cyan-300">
-                            <Info size={14} className="shrink-0 text-cyan-400" />
-                            <span><strong>{t('devSandboxOtp')}</strong> <code className="bg-black/40 px-1.5 py-0.5 rounded font-black tracking-widest">{devOtpCode}</code></span>
-                          </div>
-                        )}
                       </div>
                     </div>
 

@@ -12,7 +12,7 @@ interface AuthContextType {
   login: (email: string, pass: string) => Promise<void>
   register: (name: string, email: string, phone: string, pass: string) => Promise<void>
   logout: () => void
-  sendOtp: (phone: string, captchaToken?: string | null) => Promise<{ devOtp?: string }>
+  sendOtp: (phone: string) => Promise<void>
   verifyOtp: (phone: string, code: string) => Promise<void>
 }
 
@@ -151,25 +151,21 @@ useEffect(() => {
     }
   }
 
-  const sendOtp = async (phone: string, captchaToken?: string | null) => {
+  const sendOtp = async (phone: string) => {
     try {
-      const payload: Record<string, string> = { phone }
-      if (captchaToken) payload.captchaToken = captchaToken
-
-      const res = await fetch('/api/auth/otp', {
+      const res = await fetch('/api/v1/auth/otp/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ phone, purpose: 'login' })
       })
 
       const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to dispatch OTP')
+      if (!res.ok || !data.success) {
+        throw new Error(data.error?.message || 'Failed to dispatch OTP')
       }
 
-      toast.success(data.message)
-      return data
+      toast.success(data.data?.message || 'If this number is eligible, a verification code will be sent.')
     } catch (error: unknown) {
       toast.error(getErrorMessage(error, 'Failed to dispatch OTP'))
       throw error
@@ -179,16 +175,16 @@ useEffect(() => {
   const verifyOtp = async (phone: string, code: string) => {
     setIsLoading(true)
     try {
-      const res = await fetch('/api/auth/verify-otp', {
+      const res = await fetch('/api/v1/auth/otp/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ phone, code })
+        body: JSON.stringify({ phone, code, purpose: 'login' })
       })
 
       const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data.error || 'OTP verification failed')
+      if (!res.ok || !data.success) {
+        throw new Error(data.error?.message || 'OTP verification failed')
       }
 
       await loadProfile()
