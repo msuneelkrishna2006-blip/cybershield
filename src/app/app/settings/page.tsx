@@ -46,6 +46,7 @@ export default function SettingsPage() {
             setName(data.data.user.name || '')
             setEmail(data.data.user.email || '')
             setPhone(data.data.user.phone || '')
+            setPhoneVerified(Boolean(data.data.user.phoneVerifiedAt))
           }
         }
       } catch (err) {
@@ -57,10 +58,70 @@ export default function SettingsPage() {
     fetchProfile()
   }, [])
 
+  const normalizedPhone = () => {
+    const digits = phone.replace(/\D/g, '')
+    return digits.length === 12 && digits.startsWith('91') ? `+${digits}` : digits.length === 10 ? `+91${digits}` : ''
+  }
+
+  const handleRequestPhoneVerification = async () => {
+    const normalized = normalizedPhone()
+    if (!normalized) {
+      toast.error(t('invalidPhone'))
+      return
+    }
+    setPhoneOtpLoading(true)
+    try {
+      const response = await fetch('/api/v1/auth/otp/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ phone: normalized, purpose: 'verify_phone' }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) {
+        throw new Error(result.error?.message || 'Unable to request verification code.')
+      }
+      setPhoneOtpSent(true)
+      toast.success(result.data?.message || 'If this number is eligible, a verification code will be sent.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to request verification code.')
+    } finally {
+      setPhoneOtpLoading(false)
+    }
+  }
+
+  const handleVerifyPhone = async () => {
+    const normalized = normalizedPhone()
+    if (!normalized || !/^\d{6}$/.test(phoneOtp)) {
+      toast.error('Enter the 6-digit verification code.')
+      return
+    }
+    setPhoneOtpLoading(true)
+    try {
+      const response = await fetch('/api/v1/auth/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ phone: normalized, code: phoneOtp, purpose: 'verify_phone' }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) {
+        throw new Error(result.error?.message || 'Phone verification failed.')
+      }
+      setPhoneVerified(true)
+      setPhoneOtpSent(false)
+      setPhoneOtp('')
+      toast.success('Phone number verified.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Phone verification failed.')
+    } finally {
+      setPhoneOtpLoading(false)
+    }
+  }
+
   const handleProfileSave = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Validate email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(email)) {
       toast.error(t('invalidEmail'))
@@ -78,11 +139,12 @@ export default function SettingsPage() {
       const res = await fetch('/api/v1/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, phone })
+        body: JSON.stringify({ name, phone })
       })
       if (res.ok) {
         const data = await res.json()
         if (data.success) {
+          setPhoneVerified(Boolean(data.data.user.phoneVerifiedAt))
           toast.success(t('profileSaved'))
         } else {
           toast.error(data.error || t('profileSaveFailed'))
@@ -186,9 +248,52 @@ export default function SettingsPage() {
                       <input 
                         type="text" 
                         value={phone} 
-                        onChange={(e) => setPhone(e.target.value)}
+                        onChange={(e) => {
+                          setPhone(e.target.value)
+                          setPhoneVerified(false)
+                          setPhoneOtpSent(false)
+                          setPhoneOtp('')
+                        }}
                         className="input bg-black/40" 
                       />
+                      <p className={`text-xs ${phoneVerified ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {phoneVerified ? 'Phone number verified' : 'Phone number not verified'}
+                      </p>
+                      {!phoneVerified && (
+                        <div className="flex flex-wrap gap-2">
+                          {!phoneOtpSent ? (
+                            <button
+                              type="button"
+                              onClick={handleRequestPhoneVerification}
+                              disabled={phoneOtpLoading}
+                              className="btn-primary py-2 px-3 text-xs"
+                            >
+                              {phoneOtpLoading ? 'Sending…' : 'Send verification code'}
+                            </button>
+                          ) : (
+                            <>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                autoComplete="one-time-code"
+                                maxLength={6}
+                                value={phoneOtp}
+                                onChange={event => setPhoneOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                                placeholder="6-digit code"
+                                className="input bg-black/40 max-w-40"
+                              />
+                              <button
+                                type="button"
+                                onClick={handleVerifyPhone}
+                                disabled={phoneOtpLoading || phoneOtp.length !== 6}
+                                className="btn-primary py-2 px-3 text-xs"
+                              >
+                                {phoneOtpLoading ? 'Verifying…' : 'Verify phone'}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t('interfaceLanguage')}</label>
