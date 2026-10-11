@@ -13,7 +13,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 export default function LoginPage() {
-  const { login, sendOtp, verifyOtp } = useAuth()
+  const { login, sendOtp, verifyOtp, completeMfa } = useAuth()
   const { t } = useTranslation('auth')
   
   // Tab states: 'mobile' | 'email' | 'aadhaar'
@@ -42,6 +42,10 @@ export default function LoginPage() {
   const [resendLockoutTimer, setResendLockoutTimer] = useState(0)
   const [failedAttempts, setFailedAttempts] = useState(0)
   const [lockoutTimer, setLockoutTimer] = useState(0)
+  const [pendingMfa, setPendingMfa] = useState(false)
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaRecoveryCode, setMfaRecoveryCode] = useState('')
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false)
 
   const otpRefs = useRef<(HTMLInputElement | null)[]>(Array(6).fill(null))
 
@@ -198,6 +202,11 @@ export default function LoginPage() {
       await verifyOtp(formattedPhone, code)
       setIsSuccess(true)
     } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'MFA_REQUIRED') {
+        setPendingMfa(true)
+        setErrorText('')
+        return
+      }
       setFailedAttempts(prev => {
         const next = prev + 1
         if (next >= 5) {
@@ -223,7 +232,6 @@ export default function LoginPage() {
 
   // Resend OTP API handler
   // Resend uses the server-side Twilio Verify resend mechanism,
-  // which doesn't need a new captcha since the original session was verified.
   const handleResend = async () => {
     if (resendLocked || otpLoading) return
     
@@ -243,7 +251,6 @@ export default function LoginPage() {
     const formattedPhone = '+91' + phone.trim().replace(/\D/g, '')
 
     try {
-      // Pass null captcha for resend — the server allows resends
       // from the same session within the rate limit window
       await sendOtp(formattedPhone)
       setTimer(60)
@@ -286,9 +293,24 @@ export default function LoginPage() {
     try {
       await login(email, password)
     } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'MFA_REQUIRED') {
+        setPendingMfa(true)
+        setErrorText('')
+        return
+      }
       setErrorText(getErrorMessage(error, 'Invalid credentials'))
     } finally {
       setIsLoading(false)
+    }
+
+  }
+
+  const handleMfaSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    try {
+      await completeMfa(mfaCode, useRecoveryCode ? mfaRecoveryCode : undefined)
+    } catch (error) {
+      setErrorText(getErrorMessage(error, 'MFA verification failed'))
     }
   }
 
@@ -403,7 +425,7 @@ export default function LoginPage() {
             </div>
 
             {/* Tab Switched Header */}
-            {!(activeTab === 'mobile' && otpSent) && (
+            {!pendingMfa && !(activeTab === 'mobile' && otpSent) && (
               <div className="flex border-b border-white/10 mb-6 gap-2">
                 <button
                   onClick={() => { setActiveTab('mobile'); setOtpSent(false); }}
@@ -432,8 +454,46 @@ export default function LoginPage() {
               </div>
             )}
 
+            {pendingMfa && (
+              <form onSubmit={handleMfaSubmit} className="space-y-5">
+                <h2 className="text-lg font-bold text-white">Two-factor authentication</h2>
+                <p className="text-sm text-slate-400">Enter a current authenticator code or use one of your recovery codes.</p>
+                {useRecoveryCode ? (
+                  <input
+                    value={mfaRecoveryCode}
+                    onChange={event => setMfaRecoveryCode(event.target.value)}
+                    autoComplete="one-time-code"
+                    className="input"
+                    placeholder="Recovery code"
+                    required
+                  />
+                ) : (
+                  <input
+                    value={mfaCode}
+                    onChange={event => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    className="input"
+                    placeholder="6-digit authenticator code"
+                    required
+                  />
+                )}
+                {errorText && <p role="alert" className="text-sm text-red-400">{errorText}</p>}
+                <button type="submit" className="btn-primary w-full py-3">
+                  Verify and sign in
+                </button>
+                <button
+                  type="button"
+                  className="w-full text-sm text-cyan-400 hover:underline"
+                  onClick={() => setUseRecoveryCode(value => !value)}
+                >
+                  {useRecoveryCode ? 'Use an authenticator code' : 'Use a recovery code'}
+                </button>
+              </form>
+            )}
+
             {/* Mobile OTP Auth Tab */}
-            {activeTab === 'mobile' && (
+            {!pendingMfa && activeTab === 'mobile' && (
               <div className="space-y-6">
                 {!otpSent ? (
                   <form onSubmit={handleRequestOtp} className="space-y-6">
@@ -548,7 +608,7 @@ export default function LoginPage() {
             )}
 
             {/* Email/Password Auth Tab */}
-            {activeTab === 'email' && (
+            {!pendingMfa && activeTab === 'email' && (
               <form onSubmit={handleEmailSubmit} className="space-y-6">
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-300 ml-1">{t('emailAddress')}</label>
@@ -608,7 +668,7 @@ export default function LoginPage() {
             )}
 
             {/* Aadhaar eKYC Auth Tab */}
-            {activeTab === 'aadhaar' && (
+            {!pendingMfa && activeTab === 'aadhaar' && (
               <div className="space-y-6">
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-300 ml-1">{t('aadhaarVid')}</label>
@@ -639,11 +699,11 @@ export default function LoginPage() {
               </div>
             )}
 
-            <div className="mt-8 text-center text-sm text-slate-400">
+            {!pendingMfa && <div className="mt-8 text-center text-sm text-slate-400">
               <p className="mb-4">
                 {t('noAccount')} <Link href="/register" className="text-cyan-400 hover:underline font-semibold">{t('createAccount')}</Link>
               </p>
-            </div>
+            </div>}
           </>
         ) : (
           <form onSubmit={handleRecoverySubmit} className="space-y-6">

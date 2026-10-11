@@ -10,8 +10,12 @@ import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { getAccessToken } from '@/lib/auth/cookies';
 import { apiSuccess, apiError } from '@/lib/api/response';
+import { requireStepUp } from '@/lib/auth/step-up';
 
 export async function GET(request: NextRequest) {
+  const authorization = await requireStepUp(request, { guardianOnly: true });
+  if (!authorization.authorized) return authorization.response;
+
   try {
     const url = new URL(request.url);
     const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200);
@@ -58,7 +62,7 @@ export async function POST(request: NextRequest) {
     if (!token) return apiError('UNAUTHORIZED', 'Authentication required', 401);
 
     try {
-      verifyAccessToken(token);
+      await verifyAccessToken(token);
     } catch {
       return apiError('UNAUTHORIZED', 'Invalid or expired token', 401);
     }

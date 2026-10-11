@@ -28,6 +28,7 @@ export async function createSession(userId: string, request: NextRequest) {
       ipAddress,
       userAgent,
       lastActiveAt: new Date(),
+      lastReauthAt: new Date(),
       expiresAt,
     },
   });

@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
         name: true,
         email: true,
         phone: true,
+        phoneVerifiedAt: true,
         safetyScore: true,
         scansToday: true,
         totalScans: true,
@@ -58,12 +59,16 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    if (!hasValidCsrfOrigin(request)) {
+      return apiError('CSRF_REJECTED', 'Request origin could not be verified', 403);
+    }
+
     const token = getAccessToken(request);
     if (!token) return apiError('UNAUTHORIZED', 'Authentication required', 401);
 
     let payload;
     try {
-      payload = verifyAccessToken(token);
+      payload = await verifyAccessToken(token);
     } catch {
       return apiError('UNAUTHORIZED', 'Invalid or expired token', 401);
     }
@@ -75,14 +80,35 @@ export async function PATCH(request: NextRequest) {
       return apiError('VALIDATION_ERROR', 'Invalid profile data', 400, parsed.error.flatten().fieldErrors);
     }
 
+    const updateData: Prisma.UserUpdateInput = { ...parsed.data };
+    if (parsed.data.phone !== undefined) {
+      const normalizedPhone = normalizeIndianPhoneNumber(parsed.data.phone);
+      if (!normalizedPhone) {
+        return apiError('VALIDATION_ERROR', 'Invalid profile data', 400);
+      }
+
+      const currentUser = await prisma.user.findUnique({
+        where: { id: payload.userId },
+        select: { phone: true },
+      });
+      if (!currentUser) return apiError('NOT_FOUND', 'User not found', 404);
+
+      const currentPhone = currentUser.phone
+        ? normalizeIndianPhoneNumber(currentUser.phone)
+        : null;
+      updateData.phone = normalizedPhone;
+      if (currentPhone !== normalizedPhone) updateData.phoneVerifiedAt = null;
+    }
+
     const updated = await prisma.user.update({
       where: { id: payload.userId },
-      data: parsed.data,
+      data: updateData,
       select: {
         id: true,
         name: true,
         email: true,
         phone: true,
+        phoneVerifiedAt: true,
         safetyScore: true,
         mfaEnabled: true,
       },

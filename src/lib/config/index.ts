@@ -48,8 +48,6 @@ interface AppConfig {
     authToken: string | undefined;
     serviceSid: string | undefined;
   };
-  /** reCAPTCHA server-side secret */
-  recaptchaSecretKey: string | undefined;
 }
 
 let _config: AppConfig | null = null;
@@ -75,7 +73,6 @@ export function getConfig(): AppConfig {
       authToken: process.env.TWILIO_AUTH_TOKEN,
       serviceSid: process.env.TWILIO_SERVICE_SID,
     },
-    recaptchaSecretKey: process.env.RECAPTCHA_SECRET_KEY,
   };
 
   return _config;

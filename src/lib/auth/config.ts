@@ -11,6 +11,8 @@ const authEnvironmentSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(1, 'JWT_REFRESH_SECRET is required'),
   OTP_HMAC_SECRET: z.string().regex(/^[\da-fA-F]{64}$/, 'OTP_HMAC_SECRET must be 32 bytes encoded as hex').optional(),
   DATA_ENCRYPTION_KEY: z.string().regex(/^[\da-fA-F]{64}$/, 'DATA_ENCRYPTION_KEY must be 32 bytes encoded as hex').optional(),
+  AUTH_ENCRYPTION_KEY: z.string().regex(/^[\da-fA-F]{64}$/, 'AUTH_ENCRYPTION_KEY must be 32 bytes encoded as hex').optional(),
+  MFA_REQUIRED_FOR_GUARDIANS: z.enum(['true', 'false']).optional(),
   REDIS_URL: z.string().url().optional(),
   EMAIL_PROVIDER: z.enum(['mock', 'resend']).optional(),
   RESEND_API_KEY: z.string().optional(),
@@ -31,7 +33,7 @@ const authEnvironmentSchema = z.object({
       }
     }
 
-    for (const key of ['OTP_HMAC_SECRET', 'DATA_ENCRYPTION_KEY'] as const) {
+    for (const key of ['OTP_HMAC_SECRET', 'DATA_ENCRYPTION_KEY', 'AUTH_ENCRYPTION_KEY'] as const) {
       if (!env[key]) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
@@ -79,6 +81,8 @@ function createConfig() {
     JWT_REFRESH_SECRET: env.JWT_REFRESH_SECRET,
     OTP_HMAC_SECRET: env.OTP_HMAC_SECRET,
     DATA_ENCRYPTION_KEY: env.DATA_ENCRYPTION_KEY,
+    AUTH_ENCRYPTION_KEY: env.AUTH_ENCRYPTION_KEY,
+    MFA_REQUIRED_FOR_GUARDIANS: env.MFA_REQUIRED_FOR_GUARDIANS === 'true',
     REDIS_URL: env.REDIS_URL,
     EMAIL_PROVIDER: env.EMAIL_PROVIDER || (env.NODE_ENV === 'production' ? undefined : 'mock'),
     RESEND_API_KEY: env.RESEND_API_KEY,

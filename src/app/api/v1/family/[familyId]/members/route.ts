@@ -4,6 +4,8 @@ import { prisma } from '@/lib/prisma';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { getAccessToken } from '@/lib/auth/cookies';
 import { apiSuccess, apiError } from '@/lib/api/response';
+import { hasValidCsrfOrigin } from '@/lib/auth/csrf';
+import { requireStepUp } from '@/lib/auth/step-up';
 
 const memberSchema = z.object({
   role: z.string().min(1, 'Role is required'),
@@ -19,7 +21,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     
     let payload;
     try {
-      payload = verifyAccessToken(token);
+      payload = await verifyAccessToken(token);
     } catch {
       return apiError('UNAUTHORIZED', 'Invalid or expired token', 401);
     }
@@ -51,16 +53,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ familyId: string }> }) {
+  if (!hasValidCsrfOrigin(request)) {
+    return apiError('CSRF_REJECTED', 'Request origin could not be verified', 403);
+  }
+  const authorization = await requireStepUp(request, { guardianOnly: true });
+  if (!authorization.authorized) return authorization.response;
+
   try {
-    const token = getAccessToken(request);
-    if (!token) return apiError('UNAUTHORIZED', 'Authentication required', 401);
-    
-    let payload;
-    try {
-      payload = verifyAccessToken(token);
-    } catch {
-      return apiError('UNAUTHORIZED', 'Invalid or expired token', 401);
-    }
+    const payload = authorization.payload;
 
     const { familyId } = await params;
 

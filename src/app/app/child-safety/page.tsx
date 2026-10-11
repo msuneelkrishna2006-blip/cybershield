@@ -7,6 +7,8 @@ import { Shield, Smartphone, Clock, Settings, Gamepad2, Search, PlaySquare, Lock
 import { useAuth } from '@/contexts/AuthContext'
 import { useTranslation } from '@/contexts/TranslationContext'
 import { formatDateTime } from '@/lib/utils'
+import { useStepUpFetch } from '@/hooks/useStepUpFetch'
+import toast from 'react-hot-toast'
 
 export default function ChildSafetyPage() {
   const { user } = useAuth()
@@ -197,7 +199,7 @@ function GuardianView({
     setProfiles(updatedProfiles)
 
     try {
-      await fetch('/api/v1/child-safety', {
+      const response = await fetchWithStepUp('/api/v1/child-safety', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -236,7 +238,7 @@ function GuardianView({
     setProfiles(updatedProfiles)
 
     try {
-      await fetch('/api/v1/child-safety', {
+      const response = await fetchWithStepUp('/api/v1/child-safety', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -244,8 +246,9 @@ function GuardianView({
           deviceRestrictions: nextRestrictions
         })
       })
-    } catch (e) {
-      console.error(e)
+      if (!response.ok) throw new Error('Unable to update device restrictions.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to update device restrictions.')
     }
   }
 
@@ -294,6 +297,7 @@ function GuardianView({
           >
             <Clock size={12} /> {t('viewDetailedLog')}
           </Link>
+          {stepUpModal}
         </div>
         
         <div className="flex gap-2">

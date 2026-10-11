@@ -14,6 +14,11 @@ interface AuthContextType {
   logout: () => void
   sendOtp: (phone: string) => Promise<void>
   verifyOtp: (phone: string, code: string) => Promise<void>
+  completeMfa: (code: string, recoveryCode?: string) => Promise<void>
+}
+
+function authError(message: string, code?: string) {
+  return Object.assign(new Error(message), { code })
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -96,7 +101,7 @@ useEffect(() => {
 
       const data = await res.json()
       if (!res.ok || !data.success) {
-        throw new Error(data.error?.message || data.error || 'Login failed')
+        throw authError(data.error?.message || data.error || 'Login failed', data.error?.code)
       }
 
       await loadProfile()
@@ -184,7 +189,7 @@ useEffect(() => {
 
       const data = await res.json()
       if (!res.ok || !data.success) {
-        throw new Error(data.error?.message || 'OTP verification failed')
+        throw authError(data.error?.message || 'OTP verification failed', data.error?.code)
       }
 
       await loadProfile()
@@ -198,10 +203,34 @@ useEffect(() => {
     }
   }
 
+  const completeMfa = async (code: string, recoveryCode?: string) => {
+    setIsLoading(true)
+    try {
+      const res = await fetch('/api/v1/auth/mfa/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(recoveryCode ? { recoveryCode } : { code }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        throw authError(data.error?.message || 'MFA verification failed', data.error?.code)
+      }
+      await loadProfile()
+      toast.success('Successfully logged in!')
+      router.push('/app')
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, 'MFA verification failed'))
+      throw error
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const isAuthenticated = !!user;
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isAuthenticated, login, register, logout, sendOtp, verifyOtp }}>
+    <AuthContext.Provider value={{ user, isLoading, isAuthenticated, login, register, logout, sendOtp, verifyOtp, completeMfa }}>
       {children}
     </AuthContext.Provider>
   )
