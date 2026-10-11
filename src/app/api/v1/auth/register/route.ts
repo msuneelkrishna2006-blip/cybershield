@@ -56,13 +56,20 @@ export async function POST(request: NextRequest) {
   if (!emailLimit.allowed) return genericRegistrationResponse(startedAt);
 
   const passwordHash = await hashPassword(password);
+  const normalizedPhone = phone ? (phone.startsWith('+') ? phone : `+91${phone}`) : undefined;
   const existing = await prisma.user.findFirst({
-    where: { OR: [{ email }, ...(phone ? [{ phone: phone.startsWith('+') ? phone : `+91${phone}` }] : [])] },
+    where: {
+      OR: [
+        { email },
+        ...(normalizedPhone
+          ? [{ phone: normalizedPhone, phoneVerifiedAt: { not: null } }]
+          : []),
+      ],
+    },
     select: { id: true },
   });
   if (existing) return genericRegistrationResponse(startedAt);
 
-  const normalizedPhone = phone ? (phone.startsWith('+') ? phone : `+91${phone}`) : undefined;
   const rawToken = randomBytes(32).toString('base64url');
   const tokenHash = createHash('sha256').update(rawToken).digest('hex');
 

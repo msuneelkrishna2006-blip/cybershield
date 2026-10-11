@@ -9,6 +9,8 @@ import { hashPassword, verifyPassword, verifyUnknownUserPassword } from '@/lib/a
 import { hashRefreshToken } from '@/lib/auth/session';
 import { authRateLimiter, getRequestIp, hashRateLimitKey } from '@/lib/auth/rate-limit';
 import { waitForMinimumResponseTime } from '@/lib/auth/response-timing';
+import { createPendingMfaResponse, shouldRequireMfaChallenge } from '@/lib/auth/mfa';
+import { getAuthConfig } from '@/lib/auth/config';
 
 const loginSchema = z.object({
   email: z.string().email().max(255).toLowerCase().trim(),
@@ -49,7 +51,10 @@ export async function POST(request: NextRequest) {
 
   const user = await prisma.user.findUnique({
     where: { email },
-    include: { credential: true },
+    include: {
+      credential: true,
+      mfaSecretRecord: { select: { verifiedAt: true } },
+    },
   });
   const storedHash = user?.credential?.passwordHash || user?.passwordHash;
   const passwordMatches = storedHash
@@ -100,8 +105,21 @@ export async function POST(request: NextRequest) {
     await waitForMinimumResponseTime(startedAt, MINIMUM_INVALID_LOGIN_DURATION_MS);
   }
 
-  if (user.mfaEnabled) {
-    return apiError('MFA_REQUIRED', 'Complete multi-factor authentication to sign in.', 403);
+  if (shouldRequireMfaChallenge(user.mfaEnabled, user.mfaSecretRecord?.verifiedAt)) {
+    const response = apiError('MFA_REQUIRED', 'Complete multi-factor authentication to sign in.', 403);
+    await prisma.authAuditLog.create({
+      data: {
+        userId: user.id,
+        eventType: 'MFA_PENDING',
+        ipAddress: ip,
+        userAgent: request.headers.get('user-agent') || undefined,
+      },
+    });
+    return createPendingMfaResponse(user.id, response);
+  }
+
+  if (user.role === 'GUARDIAN' && getAuthConfig().MFA_REQUIRED_FOR_GUARDIANS) {
+    return apiError('MFA_SETUP_REQUIRED', 'Set up multi-factor authentication before signing in.', 403);
   }
 
   const { session, accessToken, refreshToken } = await issueAuthTokens(user.id, user.email, request);

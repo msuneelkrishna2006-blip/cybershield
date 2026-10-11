@@ -18,7 +18,7 @@ import { scheduleOtpSms } from '@/lib/auth/sms';
 
 const schema = z.object({
   phone: z.string().min(10).max(13),
-  purpose: z.enum(['login', 'verify_phone']).default('login'),
+  purpose: z.enum(['login', 'verify_phone', 'step_up']).default('login'),
 }).strict();
 const GENERIC_MESSAGE = 'If this number is eligible, a verification code will be sent.';
 
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
 
   const purpose: OtpPurpose = parsed.data.purpose;
   let verificationUserId: string | undefined;
-  if (purpose === 'verify_phone') {
+  if (purpose !== 'login') {
     const token = getAccessToken(request);
     if (!token) return apiError('UNAUTHORIZED', 'Authentication required', 401);
     try {
@@ -64,16 +64,10 @@ export async function POST(request: NextRequest) {
   ]);
   if (!ipLimit.allowed || !phoneLimit.allowed) return genericResponse(startedAt);
 
-  const cooldown = await prisma.otpChallenge.findFirst({
-    where: { phone, sentAt: { gt: new Date(Date.now() - 60_000) } },
-    select: { id: true },
-  });
-  if (cooldown) return genericResponse(startedAt);
-
   let userId: string | null = null;
   if (purpose === 'login') {
-    const user = await prisma.user.findUnique({
-      where: { phone },
+    const user = await prisma.user.findFirst({
+      where: { phone, phoneVerifiedAt: { not: null } },
       select: {
         id: true,
         emailVerifiedAt: true,
@@ -90,14 +84,14 @@ export async function POST(request: NextRequest) {
       return genericResponse(startedAt);
     }
     userId = user.id;
-  } else {
+  } else if (purpose === 'verify_phone') {
     const [user, phoneOwner] = await Promise.all([
       prisma.user.findUnique({
         where: { id: verificationUserId },
         select: { id: true },
       }),
-      prisma.user.findUnique({
-        where: { phone },
+      prisma.user.findFirst({
+        where: { phone, phoneVerifiedAt: { not: null } },
         select: { id: true },
       }),
     ]);
@@ -105,14 +99,56 @@ export async function POST(request: NextRequest) {
       return genericResponse(startedAt);
     }
     userId = verificationUserId!;
+  } else {
+    const user = await prisma.user.findUnique({
+      where: { id: verificationUserId },
+      select: { id: true, phone: true, phoneVerifiedAt: true, emailVerifiedAt: true },
+    });
+    if (
+      !user
+      || !user.phoneVerifiedAt
+      || !user.emailVerifiedAt
+      || user.phone !== phone
+    ) {
+      return genericResponse(startedAt);
+    }
+    userId = user.id;
   }
+
+  if (!userId) return genericResponse(startedAt);
+
+  const cooldown = await prisma.otpChallenge.findFirst({
+    where: {
+      phone,
+      purpose,
+      userId,
+      sentAt: { gt: new Date(Date.now() - 60_000) },
+    },
+    select: { id: true },
+  });
+  if (cooldown) return genericResponse(startedAt);
 
   const challengeId = createOtpChallengeId();
   const code = generateOtpCode();
   const now = new Date();
-  await prisma.$transaction(async transaction => {
+  const challengeLockKey = `${phone}:${purpose}:${userId}`;
+  const created = await prisma.$transaction(async transaction => {
+    await transaction.$queryRaw`
+      SELECT pg_advisory_xact_lock(hashtextextended(${challengeLockKey}, 0))
+    `;
+    const recentChallenge = await transaction.otpChallenge.findFirst({
+      where: {
+        phone,
+        purpose,
+        userId,
+        sentAt: { gt: new Date(now.getTime() - 60_000) },
+      },
+      select: { id: true },
+    });
+    if (recentChallenge) return false;
+
     await transaction.otpChallenge.updateMany({
-      where: { phone, purpose, usedAt: null },
+      where: { phone, purpose, userId, usedAt: null },
       data: { usedAt: now },
     });
     await transaction.otpChallenge.create({
@@ -121,14 +157,16 @@ export async function POST(request: NextRequest) {
         userId,
         phone,
         purpose,
-        codeHash: hashOtpCode(challengeId, phone, code),
+        codeHash: hashOtpCode(challengeId, phone, purpose, code),
         attempts: 0,
         maxAttempts: 5,
         sentAt: now,
         expiresAt: new Date(now.getTime() + 5 * 60 * 1000),
       },
     });
+    return true;
   });
+  if (!created) return genericResponse(startedAt);
 
   await prisma.authAuditLog.create({
     data: {

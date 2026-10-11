@@ -9,7 +9,7 @@ jest.mock('@/lib/prisma', () => ({
       findFirst: jest.fn(),
       updateMany: jest.fn(),
     },
-    user: { findUnique: jest.fn(), update: jest.fn() },
+    user: { findFirst: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     refreshToken: { create: jest.fn() },
     session: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     $queryRaw: jest.fn(),
@@ -81,11 +81,13 @@ describe('Phase 3 mobile OTP authentication', () => {
     const row = {
       id: challengeId,
       phone,
-      code_hash: hashOtpCode(challengeId, phone, code),
+      purpose: 'login' as const,
+      code_hash: hashOtpCode(challengeId, phone, 'login', code),
     };
     expect(matchesOtpCode(row, code)).toBe(true);
     expect(matchesOtpCode({ ...row, id: createOtpChallengeId() }, code)).toBe(false);
     expect(matchesOtpCode({ ...row, phone: '+919876543211' }, code)).toBe(false);
+    expect(matchesOtpCode({ ...row, purpose: 'verify_phone' }, code)).toBe(false);
   });
 
   test('rejects expired challenges without incrementing or consuming them', async () => {
@@ -98,12 +100,13 @@ describe('Phase 3 mobile OTP authentication', () => {
   test('increments attempts atomically in one statement and locks after five attempts', async () => {
     const challengeId = createOtpChallengeId();
     const phone = '+919876543210';
-    const codeHash = hashOtpCode(challengeId, phone, '654321');
+    const codeHash = hashOtpCode(challengeId, phone, 'login', '654321');
     for (let attempt = 1; attempt <= 5; attempt += 1) {
       mockedPrisma.$queryRaw.mockResolvedValueOnce([{
         id: challengeId,
         user_id: 'user-id',
         phone,
+        purpose: 'login',
         code_hash: codeHash,
         attempts: attempt,
         max_attempts: 5,
@@ -129,7 +132,8 @@ describe('Phase 3 mobile OTP authentication', () => {
         id: challengeId,
         user_id: 'user-id',
         phone,
-        code_hash: hashOtpCode(challengeId, phone, code),
+        purpose: 'login',
+        code_hash: hashOtpCode(challengeId, phone, 'login', code),
         attempts: 1,
         max_attempts: 5,
       }] as never)
@@ -149,7 +153,7 @@ describe('Phase 3 mobile OTP authentication', () => {
 
   test('returns the same response for existing and unknown numbers and does not expose the code', async () => {
     mockedPrisma.otpChallenge.findFirst.mockResolvedValue(null as never);
-    mockedPrisma.user.findUnique
+    mockedPrisma.user.findFirst
       .mockResolvedValueOnce(null as never)
       .mockResolvedValueOnce({
         id: 'eligible-user',
@@ -162,7 +166,9 @@ describe('Phase 3 mobile OTP authentication', () => {
         otpChallenge: {
           updateMany: jest.fn().mockResolvedValue({ count: 0 }),
           create: jest.fn().mockResolvedValue({}),
+          findFirst: jest.fn().mockResolvedValue(null),
         },
+        $queryRaw: jest.fn().mockResolvedValue([]),
       };
       return callback(transaction as never) as never;
     });
@@ -183,16 +189,62 @@ describe('Phase 3 mobile OTP authentication', () => {
     expect(unknownDuration).toBeGreaterThanOrEqual(700);
     expect(mockedScheduleOtpSms).toHaveBeenCalledTimes(1);
     expect(JSON.stringify(existingBody)).not.toMatch(/\b\d{6}\b/);
+    expect(mockedPrisma.user.findFirst.mock.calls[1][0]).toEqual(expect.objectContaining({
+      where: { phone: '+919876543210', phoneVerifiedAt: { not: null } },
+    }));
+  });
+
+  test('serializes OTP issuance and rechecks cooldown while holding the advisory lock', async () => {
+    const transactionCalls: string[] = [];
+    mockedPrisma.user.findFirst.mockResolvedValue({
+      id: 'eligible-user',
+      emailVerifiedAt: new Date(),
+      phoneVerifiedAt: new Date(),
+      lockedUntil: null,
+    } as never);
+    mockedPrisma.otpChallenge.findFirst.mockResolvedValue(null as never);
+    const transaction = {
+      otpChallenge: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: jest.fn().mockImplementation(async () => {
+          transactionCalls.push('create');
+          return {};
+        }),
+        findFirst: jest.fn().mockImplementation(async () => {
+          transactionCalls.push('cooldown');
+          return null;
+        }),
+      },
+      $queryRaw: jest.fn().mockImplementation(async () => {
+        transactionCalls.push('advisory-lock');
+        return [];
+      }),
+    };
+    mockedPrisma.$transaction.mockImplementation(async callback => callback(transaction as never) as never);
+
+    const response = await requestOtp(request({ phone: '+919876543210', purpose: 'login' }));
+
+    expect(response.status).toBe(202);
+    expect(transactionCalls).toEqual(['advisory-lock', 'cooldown', 'create']);
+    expect(mockedScheduleOtpSms).toHaveBeenCalledTimes(1);
   });
 
   test('enforces the 60-second cooldown without sending another SMS', async () => {
     mockedPrisma.$queryRaw.mockResolvedValue([{ count: 1, window_started_at: new Date() }] as never);
     mockedPrisma.otpChallenge.findFirst.mockResolvedValue({ id: 'recent-challenge' } as never);
+    mockedPrisma.user.findFirst.mockResolvedValue({
+      id: 'eligible-user',
+      emailVerifiedAt: new Date(),
+      phoneVerifiedAt: new Date(),
+      lockedUntil: null,
+    } as never);
 
     const response = await requestOtp(request({ phone: '9876543210' }));
 
     expect(response.status).toBe(202);
-    expect(mockedPrisma.user.findUnique).not.toHaveBeenCalled();
+    expect(mockedPrisma.user.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { phone: '+919876543210', phoneVerifiedAt: { not: null } },
+    }));
     expect(mockedPrisma.$transaction).not.toHaveBeenCalled();
     expect(mockedScheduleOtpSms).not.toHaveBeenCalled();
   });
@@ -212,7 +264,8 @@ describe('Phase 3 mobile OTP authentication', () => {
         id: challengeId,
         user_id: 'user-id',
         phone,
-        code_hash: hashOtpCode(challengeId, phone, code),
+        purpose: 'verify_phone',
+        code_hash: hashOtpCode(challengeId, phone, 'verify_phone', code),
         attempts: 1,
         max_attempts: 5,
       }] as never);
@@ -263,15 +316,16 @@ describe('Phase 3 mobile OTP authentication', () => {
     } as never);
     mockedPrisma.session.update.mockResolvedValue({} as never);
     mockedPrisma.otpChallenge.findFirst.mockResolvedValue(null as never);
-    mockedPrisma.user.findUnique
-      .mockResolvedValueOnce({ id: userId } as never)
-      .mockResolvedValueOnce(null as never);
+    mockedPrisma.user.findUnique.mockResolvedValueOnce({ id: userId } as never);
+    mockedPrisma.user.findFirst.mockResolvedValue(null as never);
     mockedPrisma.$transaction.mockImplementation(async callback => {
       const transaction = {
         otpChallenge: {
           updateMany: jest.fn().mockResolvedValue({ count: 0 }),
           create: jest.fn().mockResolvedValue({}),
+          findFirst: jest.fn().mockResolvedValue(null),
         },
+        $queryRaw: jest.fn().mockResolvedValue([]),
       };
       return callback(transaction as never) as never;
     });
@@ -291,7 +345,8 @@ describe('Phase 3 mobile OTP authentication', () => {
         id: challengeId,
         user_id: userId,
         phone,
-        code_hash: hashOtpCode(challengeId, phone, code),
+        purpose: 'verify_phone',
+        code_hash: hashOtpCode(challengeId, phone, 'verify_phone', code),
         attempts: 1,
         max_attempts: 5,
       }] as never);
@@ -311,6 +366,151 @@ describe('Phase 3 mobile OTP authentication', () => {
       where: { id: userId },
       data: { phone, phoneVerifiedAt: expect.any(Date) },
     });
+  });
+
+  test('lets multiple accounts claim an unverified phone, but only the first verification succeeds', async () => {
+    const phone = '+919876543210';
+    const sessionSecret = 'shared-test-session-secret';
+    const accountA = '11111111-1111-4111-8111-111111111111';
+    const accountB = '22222222-2222-4222-8222-222222222222';
+    const sessionA = 'session-a';
+    const sessionB = 'session-b';
+    const now = new Date();
+    const accessTokenA = signAccessToken({ userId: accountA, sessionId: sessionA, sessionSecret });
+    const accessTokenB = signAccessToken({ userId: accountB, sessionId: sessionB, sessionSecret });
+    mockedPrisma.session.findUnique.mockResolvedValue({
+      token: createHash('sha256').update(sessionSecret).digest('hex'),
+      lastActiveAt: now,
+      expiresAt: new Date(now.getTime() + 60_000),
+      revokedAt: null,
+    } as never);
+    mockedPrisma.session.update.mockResolvedValue({} as never);
+    mockedPrisma.user.findUnique
+      .mockResolvedValueOnce({ id: accountA } as never)
+      .mockResolvedValueOnce({ id: accountB } as never);
+    mockedPrisma.user.findFirst.mockResolvedValue(null as never);
+    mockedPrisma.otpChallenge.findFirst.mockResolvedValue(null as never);
+    mockedPrisma.otpChallenge.updateMany.mockResolvedValue({ count: 1 } as never);
+
+    const createdChallenges: Array<{ id: string; userId: string; phone: string; purpose: string; codeHash: string }> = [];
+    mockedPrisma.$transaction.mockImplementation(async callback => callback({
+      otpChallenge: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: jest.fn().mockImplementation(async ({ data }) => {
+          createdChallenges.push(data);
+          return data;
+        }),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([]),
+    } as never) as never);
+
+    const responseA = await requestOtp(request(
+      { phone, purpose: 'verify_phone' },
+      '/api/v1/auth/otp/request',
+      `__Host-cs_session=${accessTokenA}`,
+    ));
+    const responseB = await requestOtp(request(
+      { phone, purpose: 'verify_phone' },
+      '/api/v1/auth/otp/request',
+      `__Host-cs_session=${accessTokenB}`,
+    ));
+    expect(responseA.status).toBe(202);
+    expect(responseB.status).toBe(202);
+    expect(createdChallenges.map(challenge => challenge.userId)).toEqual([accountA, accountB]);
+
+    const challengeA = createdChallenges[0];
+    const challengeB = createdChallenges[1];
+    const codeA = mockedScheduleOtpSms.mock.calls[0][0].code;
+    const codeB = mockedScheduleOtpSms.mock.calls[1][0].code;
+    mockedPrisma.$queryRaw
+      .mockResolvedValueOnce([{ count: 1, window_started_at: now }] as never)
+      .mockResolvedValueOnce([{ count: 1, window_started_at: now }] as never)
+      .mockResolvedValueOnce([{
+        id: challengeA.id,
+        user_id: accountA,
+        phone,
+        purpose: 'verify_phone',
+        code_hash: challengeA.codeHash,
+        attempts: 1,
+        max_attempts: 5,
+      }] as never)
+      .mockResolvedValueOnce([{ count: 1, window_started_at: now }] as never)
+      .mockResolvedValueOnce([{ count: 1, window_started_at: now }] as never)
+      .mockResolvedValueOnce([{
+        id: challengeB.id,
+        user_id: accountB,
+        phone,
+        purpose: 'verify_phone',
+        code_hash: challengeB.codeHash,
+        attempts: 1,
+        max_attempts: 5,
+      }] as never);
+    mockedPrisma.user.update
+      .mockResolvedValueOnce({} as never)
+      .mockRejectedValueOnce(Object.assign(new Error('Unique constraint failed'), { code: 'P2002' }));
+
+    const verifiedA = await verifyOtp(request(
+      { phone, code: codeA, purpose: 'verify_phone' },
+      '/api/v1/auth/otp/verify',
+      `__Host-cs_session=${accessTokenA}`,
+    ));
+    const verifiedB = await verifyOtp(request(
+      { phone, code: codeB, purpose: 'verify_phone' },
+      '/api/v1/auth/otp/verify',
+      `__Host-cs_session=${accessTokenB}`,
+    ));
+
+    expect(verifiedA.status).toBe(200);
+    expect(verifiedB.status).toBe(400);
+    expect(await verifiedB.json()).toMatchObject({
+      error: {
+        code: 'INVALID_OTP',
+        message: 'The verification code is invalid or expired.',
+      },
+    });
+    expect(mockedPrisma.authAuditLog.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        userId: accountB,
+        eventType: 'PHONE_VERIFICATION_CONFLICT',
+      }),
+    }));
+    expect(JSON.stringify(mockedPrisma.authAuditLog.create.mock.calls)).not.toContain(phone);
+    expect(JSON.stringify(mockedPrisma.$queryRaw.mock.calls[6])).toContain(accountA);
+    expect(JSON.stringify(mockedPrisma.$queryRaw.mock.calls[9])).toContain(accountB);
+  });
+
+  test('OTP login selects only the account whose phone is verified', async () => {
+    const phone = '+919876543210';
+    const createdChallenges: Array<{ userId: string | null }> = [];
+    mockedPrisma.user.findFirst.mockResolvedValue({
+      id: 'verified-owner',
+      emailVerifiedAt: new Date(),
+      phoneVerifiedAt: new Date(),
+      lockedUntil: null,
+    } as never);
+    mockedPrisma.otpChallenge.findFirst.mockResolvedValue(null as never);
+    mockedPrisma.$transaction.mockImplementation(async callback => callback({
+      otpChallenge: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: jest.fn().mockImplementation(async ({ data }) => {
+          createdChallenges.push(data);
+          return data;
+        }),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([]),
+    } as never) as never);
+
+    const response = await requestOtp(request({ phone, purpose: 'login' }));
+
+    expect(response.status).toBe(202);
+    expect(mockedPrisma.user.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { phone, phoneVerifiedAt: { not: null } },
+    }));
+    expect(createdChallenges).toHaveLength(1);
+    expect(createdChallenges[0]).toEqual(expect.objectContaining({ userId: 'verified-owner' }));
+    expect(mockedScheduleOtpSms).toHaveBeenCalledTimes(1);
   });
 
   test('changing a phone clears its previous verification and requires a valid origin', async () => {
