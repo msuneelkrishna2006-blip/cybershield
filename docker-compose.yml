@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: postgres:16-alpine
@@ -36,8 +34,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      DATABASE_URL: postgresql://user:password@db:5432/cybershield?schema=public
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: "postgresql://user:password@db:5432/cybershield?schema=public"
+      REDIS_URL: "redis://redis:6379"
       NODE_ENV: production
     depends_on:
       db:
@@ -49,11 +47,9 @@ services:
   worker:
     build:
       context: .
-      # Assuming a different command or entrypoint for worker if needed
-      # command: npm run worker
     environment:
-      DATABASE_URL: postgresql://user:password@db:5432/cybershield?schema=public
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: "postgresql://user:password@db:5432/cybershield?schema=public"
+      REDIS_URL: "redis://redis:6379"
       NODE_ENV: production
     depends_on:
       db:

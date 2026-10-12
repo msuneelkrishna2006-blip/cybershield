@@ -1,6 +1,8 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
+import Image from 'next/image'
+import { Language } from '@/types'
 import { Card, Badge, Spinner } from '@/components/ui'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTranslation } from '@/contexts/TranslationContext'
@@ -9,17 +11,33 @@ import {
   Key, Save, CheckCircle, Settings
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useStepUpFetch } from '@/hooks/useStepUpFetch'
 
 export default function SettingsPage() {
+  const { fetchWithStepUp, stepUpModal } = useStepUpFetch()
   const { user } = useAuth()
   const { t, language, setLanguage, languages } = useTranslation('settings')
-  const [activeSection, setActiveSection] = useState<'profile' | 'notifications' | 'privacy' | 'family' | 'contacts'>('profile')
+  const [activeSection, setActiveSection] = useState<'profile' | 'notifications' | 'privacy' | 'family' | 'contacts' | 'security'>('profile')
   const [isLoadingProfile, setIsLoadingProfile] = useState(true)
 
   // Form states
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
+  const [phoneVerified, setPhoneVerified] = useState(false)
+  const [phoneOtpSent, setPhoneOtpSent] = useState(false)
+  const [phoneOtp, setPhoneOtp] = useState('')
+  const [phoneOtpLoading, setPhoneOtpLoading] = useState(false)
+  const [mfaCurrentPassword, setMfaCurrentPassword] = useState('')
+  const [mfaConfirmCode, setMfaConfirmCode] = useState('')
+  const [mfaEnrollment, setMfaEnrollment] = useState<{ secret: string; qrCodeDataUrl: string } | null>(null)
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([])
+  const [mfaEnabled, setMfaEnabled] = useState(false)
+  const [securityPassword, setSecurityPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [sessions, setSessions] = useState<Array<{ id: string; ipAddress: string | null; userAgent: string | null; lastActiveAt: string; isCurrent: boolean }>>([])
+  const [securityLoading, setSecurityLoading] = useState(false)
+  const [accountDeleteLoading, setAccountDeleteLoading] = useState(false)
   
   // Notification states
   const [notifScam, setNotifScam] = useState(true)
@@ -42,6 +60,8 @@ export default function SettingsPage() {
             setName(data.data.user.name || '')
             setEmail(data.data.user.email || '')
             setPhone(data.data.user.phone || '')
+            setPhoneVerified(Boolean(data.data.user.phoneVerifiedAt))
+            setMfaEnabled(Boolean(data.data.user.mfaEnabled))
           }
         }
       } catch (err) {
@@ -53,10 +73,207 @@ export default function SettingsPage() {
     fetchProfile()
   }, [])
 
+  const normalizedPhone = () => {
+    const digits = phone.replace(/\D/g, '')
+    return digits.length === 12 && digits.startsWith('91') ? `+${digits}` : digits.length === 10 ? `+91${digits}` : ''
+  }
+
+  const handleRequestPhoneVerification = async () => {
+    const normalized = normalizedPhone()
+    if (!normalized) {
+      toast.error(t('invalidPhone'))
+      return
+    }
+    setPhoneOtpLoading(true)
+    try {
+      const response = await fetch('/api/v1/auth/otp/request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ phone: normalized, purpose: 'verify_phone' }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) {
+        throw new Error(result.error?.message || 'Unable to request verification code.')
+      }
+      setPhoneOtpSent(true)
+      toast.success(result.data?.message || 'If this number is eligible, a verification code will be sent.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to request verification code.')
+    } finally {
+      setPhoneOtpLoading(false)
+    }
+  }
+
+  const handleVerifyPhone = async () => {
+    const normalized = normalizedPhone()
+    if (!normalized || !/^\d{6}$/.test(phoneOtp)) {
+      toast.error('Enter the 6-digit verification code.')
+      return
+    }
+
+    setPhoneOtpLoading(true)
+    try {
+      const response = await fetch('/api/v1/auth/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ phone: normalized, code: phoneOtp, purpose: 'verify_phone' }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) {
+        throw new Error(result.error?.message || 'Phone verification failed.')
+      }
+      setPhoneVerified(true)
+      setPhoneOtpSent(false)
+      setPhoneOtp('')
+      toast.success('Phone number verified.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Phone verification failed.')
+    } finally {
+      setPhoneOtpLoading(false)
+    }
+  }
+
+  const loadSessions = async () => {
+    const response = await fetch('/api/v1/auth/sessions', { credentials: 'include' })
+    const result = await response.json()
+    if (!response.ok || !result.success) throw new Error(result.error?.message || 'Unable to load sessions.')
+    setSessions(result.data.sessions)
+  }
+
+  const handleMfaEnroll = async () => {
+    setSecurityLoading(true)
+    try {
+      const response = await fetch('/api/v1/auth/mfa/enroll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ currentPassword: mfaCurrentPassword }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) throw new Error(result.error?.message || 'Unable to start MFA enrollment.')
+      setMfaEnrollment({ secret: result.data.secret, qrCodeDataUrl: result.data.qrCodeDataUrl })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to start MFA enrollment.')
+    } finally {
+      setSecurityLoading(false)
+    }
+  }
+
+  const handleMfaConfirm = async () => {
+    setSecurityLoading(true)
+    try {
+      const response = await fetchWithStepUp('/api/v1/auth/mfa/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ code: mfaConfirmCode }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) throw new Error(result.error?.message || 'Unable to confirm MFA.')
+      setRecoveryCodes(result.data.recoveryCodes)
+      setMfaEnabled(true)
+      setMfaEnrollment(null)
+      setMfaConfirmCode('')
+      toast.success('Multi-factor authentication enabled. Save your recovery codes.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to confirm MFA.')
+    } finally {
+      setSecurityLoading(false)
+    }
+  }
+
+  const handleMfaDisable = async () => {
+    setSecurityLoading(true)
+    try {
+      const response = await fetchWithStepUp('/api/v1/auth/mfa/disable', { method: 'POST', credentials: 'include' })
+      const result = await response.json()
+      if (!response.ok || !result.success) throw new Error(result.error?.message || 'Unable to disable MFA.')
+      setMfaEnabled(false)
+      setSecurityPassword('')
+      setRecoveryCodes([])
+      toast.success('Multi-factor authentication disabled.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to disable MFA.')
+    } finally {
+      setSecurityLoading(false)
+    }
+  }
+
+  const handleChangePassword = async () => {
+    setSecurityLoading(true)
+    try {
+      const response = await fetchWithStepUp('/api/v1/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ currentPassword: securityPassword, newPassword }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) throw new Error(result.error?.message || 'Unable to change password.')
+      setSecurityPassword('')
+      setNewPassword('')
+      toast.success(result.data.message)
+      await loadSessions()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to change password.')
+    } finally {
+      setSecurityLoading(false)
+    }
+  }
+
+  const handleRevokeSession = async (sessionId: string) => {
+    try {
+      const response = await fetch(`/api/v1/auth/sessions/${sessionId}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) throw new Error(result.error?.message || 'Unable to revoke session.')
+      await loadSessions()
+      toast.success(result.data.message)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to revoke session.')
+    }
+  }
+
+  const handleLogoutAll = async () => {
+    try {
+      const response = await fetch('/api/v1/auth/sessions/logout-all', {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) throw new Error(result.error?.message || 'Unable to log out all devices.')
+      toast.success(result.data.message)
+      window.location.assign('/login')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to log out all devices.')
+    }
+  }
+
+  const handleDeleteAccount = async () => {
+    if (!window.confirm('Delete your CyberShield account and associated account data? This cannot be undone.')) return
+    setAccountDeleteLoading(true)
+    try {
+      const response = await fetchWithStepUp('/api/v1/auth/account', {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) throw new Error(result.error?.message || 'Unable to delete account.')
+      window.location.assign('/login')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to delete account.')
+    } finally {
+      setAccountDeleteLoading(false)
+    }
+  }
+
   const handleProfileSave = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Validate email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(email)) {
       toast.error(t('invalidEmail'))
@@ -74,11 +291,12 @@ export default function SettingsPage() {
       const res = await fetch('/api/v1/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, phone })
+        body: JSON.stringify({ name, phone })
       })
       if (res.ok) {
         const data = await res.json()
         if (data.success) {
+          setPhoneVerified(Boolean(data.data.user.phoneVerifiedAt))
           toast.success(t('profileSaved'))
         } else {
           toast.error(data.error || t('profileSaveFailed'))
@@ -117,19 +335,20 @@ export default function SettingsPage() {
         
         {/* Left Sidebar Sections List */}
         <div className="md:col-span-3 space-y-1">
-          {[
+          {([
             { id: 'profile', label: t('accountProfile'), icon: User },
             { id: 'notifications', label: t('notifications'), icon: Bell },
             { id: 'privacy', label: t('privacyData'), icon: Shield },
             { id: 'family', label: t('familySettings'), icon: Users },
             { id: 'contacts', label: t('emergencySosContacts'), icon: Key },
-          ].map(section => {
+            { id: 'security', label: 'Security', icon: Shield },
+          ] as const).map(section => {
             const Icon = section.icon
             const isActive = activeSection === section.id
             return (
               <button
                 key={section.id}
-                onClick={() => setActiveSection(section.id as any)}
+                onClick={() => setActiveSection(section.id)}
                 className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left text-sm font-bold transition-all border cursor-pointer ${
                   isActive 
                     ? 'bg-purple-500/10 text-purple-400 border-purple-500/20 shadow-[0_0_15px_rgba(139,92,246,0.05)]' 
@@ -182,15 +401,58 @@ export default function SettingsPage() {
                       <input 
                         type="text" 
                         value={phone} 
-                        onChange={(e) => setPhone(e.target.value)}
+                        onChange={(e) => {
+                          setPhone(e.target.value)
+                          setPhoneVerified(false)
+                          setPhoneOtpSent(false)
+                          setPhoneOtp('')
+                        }}
                         className="input bg-black/40" 
                       />
+                      <p className={`text-xs ${phoneVerified ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {phoneVerified ? 'Phone number verified' : 'Phone number not verified'}
+                      </p>
+                      {!phoneVerified && (
+                        <div className="flex flex-wrap gap-2">
+                          {!phoneOtpSent ? (
+                            <button
+                              type="button"
+                              onClick={handleRequestPhoneVerification}
+                              disabled={phoneOtpLoading}
+                              className="btn-primary py-2 px-3 text-xs"
+                            >
+                              {phoneOtpLoading ? 'Sending…' : 'Send verification code'}
+                            </button>
+                          ) : (
+                            <>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                autoComplete="one-time-code"
+                                maxLength={6}
+                                value={phoneOtp}
+                                onChange={event => setPhoneOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                                placeholder="6-digit code"
+                                className="input bg-black/40 max-w-40"
+                              />
+                              <button
+                                type="button"
+                                onClick={handleVerifyPhone}
+                                disabled={phoneOtpLoading || phoneOtp.length !== 6}
+                                className="btn-primary py-2 px-3 text-xs"
+                              >
+                                {phoneOtpLoading ? 'Verifying…' : 'Verify phone'}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t('interfaceLanguage')}</label>
                       <select 
                         value={language} 
-                        onChange={(e) => setLanguage(e.target.value as any)}
+                        onChange={(e) => setLanguage(e.target.value as Language)}
                         className="input bg-black/40 cursor-pointer"
                       >
                         {languages.map((lang) => (
@@ -209,6 +471,122 @@ export default function SettingsPage() {
                   </div>
                 </form>
               )}
+            </Card>
+          )}
+
+          {activeSection === 'security' && (
+            <Card className="p-6 space-y-8">
+              <section className="space-y-4">
+                <h3 className="text-lg font-black text-white">Multi-factor authentication</h3>
+                <p className="text-sm text-slate-400">
+                  {mfaEnabled ? 'MFA is enabled for this account.' : 'Protect your account with an authenticator app.'}
+                </p>
+                {!mfaEnabled && !mfaEnrollment && (
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={mfaCurrentPassword}
+                      onChange={event => setMfaCurrentPassword(event.target.value)}
+                      className="input"
+                      placeholder="Re-enter current password"
+                    />
+                    <button type="button" disabled={securityLoading || !mfaCurrentPassword} onClick={handleMfaEnroll} className="btn-primary px-4">
+                      Start setup
+                    </button>
+                  </div>
+                )}
+                {mfaEnrollment && (
+                  <div className="space-y-3">
+                    <Image src={mfaEnrollment.qrCodeDataUrl} alt="Authenticator setup QR code" width={176} height={176} unoptimized className="bg-white p-2 rounded" />
+                    <p className="text-xs text-slate-300 break-all">Manual key: {mfaEnrollment.secret}</p>
+                    <input
+                      value={mfaConfirmCode}
+                      onChange={event => setMfaConfirmCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      className="input"
+                      placeholder="Enter 6-digit authenticator code"
+                    />
+                    <button type="button" disabled={securityLoading || mfaConfirmCode.length !== 6} onClick={handleMfaConfirm} className="btn-primary px-4">
+                      Confirm and enable
+                    </button>
+                  </div>
+                )}
+                {mfaEnabled && (
+                  <div className="flex gap-2">
+                    <button type="button" disabled={securityLoading} onClick={handleMfaDisable} className="btn-primary px-4">
+                      Disable MFA
+                    </button>
+                  </div>
+                )}
+                {recoveryCodes.length > 0 && (
+                  <div className="rounded border border-amber-500/30 p-4">
+                    <p className="mb-2 text-sm text-amber-300">Save these recovery codes now. They are shown only once.</p>
+                    <ul className="grid grid-cols-2 gap-2 font-mono text-sm text-white">
+                      {recoveryCodes.map(code => <li key={code}>{code}</li>)}
+                    </ul>
+                    <button type="button" onClick={() => setRecoveryCodes([])} className="mt-3 text-xs text-cyan-400">I saved these codes</button>
+                  </div>
+                )}
+              </section>
+              <section className="space-y-3 border-t border-white/10 pt-5">
+                <h3 className="text-lg font-black text-white">Change password</h3>
+                <input
+                  type="password"
+                  value={securityPassword}
+                  onChange={event => setSecurityPassword(event.target.value)}
+                  className="input"
+                  placeholder="Current password"
+                />
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={event => setNewPassword(event.target.value)}
+                  minLength={12}
+                  maxLength={128}
+                  className="input"
+                  placeholder="New password (12–128 characters)"
+                />
+                <button type="button" disabled={securityLoading || !securityPassword || newPassword.length < 12} onClick={handleChangePassword} className="btn-primary px-4">
+                  Change password
+                </button>
+              </section>
+              <section className="space-y-3 border-t border-white/10 pt-5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-black text-white">Active sessions</h3>
+                  <button
+                    type="button"
+                    onClick={() => void loadSessions().catch(error => toast.error(error instanceof Error ? error.message : 'Unable to load sessions.'))}
+                    className="text-sm text-cyan-400 hover:underline"
+                  >
+                    Refresh
+                  </button>
+                </div>
+                {sessions.map(session => (
+                  <div key={session.id} className="flex items-center justify-between gap-3 rounded bg-white/5 p-3">
+                    <div className="min-w-0 text-xs text-slate-300">
+                      <p className="truncate">{session.userAgent || 'Unknown device'} {session.isCurrent ? '(This device)' : ''}</p>
+                      <p>{session.ipAddress || 'Unknown IP'} · {new Date(session.lastActiveAt).toLocaleString()}</p>
+                    </div>
+                    <button type="button" onClick={() => void handleRevokeSession(session.id)} className="shrink-0 text-xs text-red-400 hover:underline">Revoke</button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => void handleLogoutAll()} className="rounded border border-red-500/30 px-4 py-2 text-sm text-red-300">
+                  Log out all devices
+                </button>
+              </section>
+              <section className="space-y-3 border-t border-red-500/20 pt-5">
+                <h3 className="text-lg font-black text-red-300">Delete account</h3>
+                <p className="text-sm text-slate-400">Permanently delete your account and associated data.</p>
+                <button
+                  type="button"
+                  disabled={accountDeleteLoading}
+                  onClick={() => void handleDeleteAccount()}
+                  className="rounded border border-red-500/40 px-4 py-2 text-sm text-red-300"
+                >
+                  Delete account
+                </button>
+              </section>
             </Card>
           )}
 
@@ -369,6 +747,7 @@ export default function SettingsPage() {
 
       </div>
 
+      {stepUpModal}
     </div>
   )
 }

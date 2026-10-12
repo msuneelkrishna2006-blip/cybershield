@@ -6,9 +6,11 @@ import { Card, Badge, RiskScore, StatCard, Spinner } from '@/components/ui'
 import { Users, Shield, AlertTriangle, Plus, ShieldCheck, Mail, Smartphone, X } from 'lucide-react'
 import { calculateFamilyRiskScore } from '@/lib/risk-scoring'
 import { useTranslation } from '@/contexts/TranslationContext'
+import { useStepUpFetch } from '@/hooks/useStepUpFetch'
 import toast from 'react-hot-toast'
 
 export default function FamilyManagementPage() {
+  const { fetchWithStepUp, stepUpModal } = useStepUpFetch()
   const { t } = useTranslation('family')
   const [members, setMembers] = useState<any[]>([])
   const [alertsCount, setAlertsCount] = useState(0)
@@ -53,7 +55,7 @@ export default function FamilyManagementPage() {
 
     setIsSubmitting(inviteName.trim() !== '')
     try {
-      const res = await fetch('/api/v1/family', {
+      const res = await fetchWithStepUp('/api/v1/family', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -75,6 +77,9 @@ export default function FamilyManagementPage() {
         } else {
           toast.error(data.error || t('inviteFailed'))
         }
+      } else {
+        const data = await res.json()
+        toast.error(data.error?.message || t('inviteFailed'))
       }
     } catch (err) {
       console.error(err)
@@ -289,6 +294,7 @@ export default function FamilyManagementPage() {
           </Card>
         </div>
       )}
+      {stepUpModal}
     </div>
   )
 }

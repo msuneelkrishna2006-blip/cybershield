@@ -10,10 +10,21 @@ import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyRefreshToken, signAccessToken, signRefreshToken } from '@/lib/auth/jwt';
 import { getRefreshToken, setAuthCookies } from '@/lib/auth/cookies';
-import { validateSession } from '@/lib/auth/session';
+import { consumeRefreshToken, hashRefreshToken, validateSession } from '@/lib/auth/session';
 import { apiSuccess, apiError } from '@/lib/api/response';
+import { hasValidCsrfOrigin } from '@/lib/auth/csrf';
+import { authRateLimiter, getRequestIp, hashRateLimitKey } from '@/lib/auth/rate-limit';
 
 export async function POST(request: NextRequest) {
+  if (!hasValidCsrfOrigin(request)) {
+    return apiError('CSRF_REJECTED', 'Request origin could not be verified', 403);
+  }
+  const limit = await authRateLimiter.consume(
+    `refresh:ip:${hashRateLimitKey(getRequestIp(request))}`,
+    60,
+    15 * 60 * 1000,
+  );
+  if (!limit.allowed) return apiError('RATE_LIMITED', 'Too many attempts. Please try again later.', 429);
   try {
     const token = getRefreshToken(request);
 
@@ -32,8 +43,9 @@ export async function POST(request: NextRequest) {
     // Check if the refresh token exists in DB and is not revoked
     const storedToken = await prisma.refreshToken.findFirst({
       where: {
-        token,
+        token: hashRefreshToken(token),
         userId: payload.userId,
+        sessionId: payload.sessionId,
         revoked: false,
         expiresAt: { gt: new Date() },
       },
@@ -50,7 +62,7 @@ export async function POST(request: NextRequest) {
         data: {
           userId: payload.userId,
           eventType: 'TOKEN_REUSE_DETECTED',
-          ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+          ipAddress: getRequestIp(request),
           userAgent: request.headers.get('user-agent') || 'unknown',
         },
       });
@@ -59,26 +71,39 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate the session is still active
-    const session = await validateSession(payload.sessionId);
+    const session = await validateSession(payload.sessionId, payload.sessionSecret);
     if (!session) {
       return apiError('SESSION_EXPIRED', 'Session has expired. Please log in again.', 401);
     }
 
-    // Revoke the old refresh token (rotation)
-    await prisma.refreshToken.update({
-      where: { token: storedToken.token },
-      data: { revoked: true },
-    });
+    // Conditional consume prevents two concurrent refreshes from both rotating the same token.
+    if (!(await consumeRefreshToken(token, payload.userId, payload.sessionId))) {
+      await prisma.refreshToken.updateMany({
+        where: { userId: payload.userId, revoked: false },
+        data: { revoked: true },
+      });
+      await prisma.authAuditLog.create({
+        data: {
+          userId: payload.userId,
+          eventType: 'TOKEN_REUSE_DETECTED',
+          ipAddress: getRequestIp(request),
+          userAgent: request.headers.get('user-agent') || 'unknown',
+        },
+      });
+      return apiError('TOKEN_REUSE', 'Token has been revoked. Please log in again.', 401);
+    }
 
     // Issue new tokens
     const newAccessToken = signAccessToken({
       userId: payload.userId,
       sessionId: payload.sessionId,
+      sessionSecret: payload.sessionSecret,
     });
 
     const newRefreshToken = signRefreshToken({
       userId: payload.userId,
       sessionId: payload.sessionId,
+      sessionSecret: payload.sessionSecret,
     });
 
     // Store new refresh token
@@ -87,8 +112,9 @@ export async function POST(request: NextRequest) {
 
     await prisma.refreshToken.create({
       data: {
-        token: newRefreshToken,
+        token: hashRefreshToken(newRefreshToken),
         userId: payload.userId,
+        sessionId: payload.sessionId,
         expiresAt: refreshExpiry,
       },
     });
@@ -100,8 +126,8 @@ export async function POST(request: NextRequest) {
     });
 
     return response;
-  } catch (error) {
-    console.error('[Auth] Token refresh error:', error instanceof Error ? error.message : 'Unknown');
+  } catch {
+    console.error('[Auth] Token refresh failed');
     return apiError('INTERNAL_ERROR', 'Token refresh failed', 500);
   }
 }

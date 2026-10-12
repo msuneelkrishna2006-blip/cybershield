@@ -6,11 +6,14 @@ import { motion } from 'framer-motion'
 import { ShieldLogo, Spinner } from '@/components/ui'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTranslation } from '@/contexts/TranslationContext'
-import { ArrowRight, Mail, Lock, Phone, Key, ShieldCheck, AlertCircle, Info, Check, X } from 'lucide-react'
-import ReCAPTCHA from 'react-google-recaptcha'
+import { ArrowRight, Mail, Lock, Phone, ShieldCheck, AlertCircle } from 'lucide-react'
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
 
 export default function LoginPage() {
-  const { login, sendOtp, verifyOtp } = useAuth()
+  const { login, sendOtp, verifyOtp, completeMfa } = useAuth()
   const { t } = useTranslation('auth')
   
   // Tab states: 'mobile' | 'email' | 'aadhaar'
@@ -24,11 +27,7 @@ export default function LoginPage() {
   // Mobile form states
   const [phone, setPhone] = useState('')
   const [otpSent, setOtpSent] = useState(false)
-  const [devOtpCode, setDevOtpCode] = useState('') // Helper for local testing
   const [otpLoading, setOtpLoading] = useState(false)
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null)
-  const recaptchaRef = useRef<ReCAPTCHA | null>(null)
-  const captchaTokenRef = useRef<string | null>(null) // Mirror of captchaToken for use in closures
 
   // 6-digit OTP states
   const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', ''])
@@ -37,32 +36,18 @@ export default function LoginPage() {
   const [isSuccess, setIsSuccess] = useState(false)
 
   // Resend and lockout states
-  const [timer, setTimer] = useState(30)
+  const [timer, setTimer] = useState(60)
   const [resendCount, setResendCount] = useState(0)
   const [resendLocked, setResendLocked] = useState(false)
   const [resendLockoutTimer, setResendLockoutTimer] = useState(0)
   const [failedAttempts, setFailedAttempts] = useState(0)
   const [lockoutTimer, setLockoutTimer] = useState(0)
+  const [pendingMfa, setPendingMfa] = useState(false)
+  const [mfaCode, setMfaCode] = useState('')
+  const [mfaRecoveryCode, setMfaRecoveryCode] = useState('')
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false)
 
   const otpRefs = useRef<(HTMLInputElement | null)[]>(Array(6).fill(null))
-
-  // Keep captchaTokenRef in sync with state
-  useEffect(() => {
-    captchaTokenRef.current = captchaToken
-  }, [captchaToken])
-
-  // Helper: reset reCAPTCHA widget and clear token
-  const resetCaptcha = () => {
-    setCaptchaToken(null)
-    captchaTokenRef.current = null
-    try {
-      if (recaptchaRef.current) {
-        recaptchaRef.current.reset()
-      }
-    } catch (err) {
-      console.error('reCAPTCHA reset error', err)
-    }
-  }
 
   // Resend Countdown
   useEffect(() => {
@@ -120,8 +105,8 @@ export default function LoginPage() {
       navigator.credentials.get({
         otp: { transport: ['sms'] },
         signal: ac.signal
-      } as any).then((otpCred: any) => {
-        if (otpCred && otpCred.code) {
+      } as CredentialRequestOptions & { otp: { transport: string[] } }).then(otpCred => {
+        if (otpCred && 'code' in otpCred && typeof otpCred.code === 'string') {
           const code = otpCred.code.slice(0, 6)
           const newDigits = [...otpDigits]
           for (let i = 0; i < 6; i++) {
@@ -216,14 +201,19 @@ export default function LoginPage() {
     try {
       await verifyOtp(formattedPhone, code)
       setIsSuccess(true)
-    } catch (err: any) {
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'MFA_REQUIRED') {
+        setPendingMfa(true)
+        setErrorText('')
+        return
+      }
       setFailedAttempts(prev => {
         const next = prev + 1
         if (next >= 5) {
           setLockoutTimer(60) // Lock out for 60 seconds
           setErrorText(t('tooManyAttempts', { seconds: '60' }))
         } else {
-          setErrorText(err.message || t('invalidOtp'))
+          setErrorText(getErrorMessage(err, t('invalidOtp')))
         }
         return next
       })
@@ -242,7 +232,6 @@ export default function LoginPage() {
 
   // Resend OTP API handler
   // Resend uses the server-side Twilio Verify resend mechanism,
-  // which doesn't need a new captcha since the original session was verified.
   const handleResend = async () => {
     if (resendLocked || otpLoading) return
     
@@ -262,18 +251,14 @@ export default function LoginPage() {
     const formattedPhone = '+91' + phone.trim().replace(/\D/g, '')
 
     try {
-      // Pass null captcha for resend — the server allows resends
       // from the same session within the rate limit window
-      const data = await sendOtp(formattedPhone, null)
-      setTimer(30) // Reset 30s countdown
-      if (data && data.devOtp) {
-        setDevOtpCode(data.devOtp)
-      }
+      await sendOtp(formattedPhone)
+      setTimer(60)
       setTimeout(() => {
         otpRefs.current[0]?.focus()
       }, 50)
-    } catch (err: any) {
-      setErrorText(err.message || 'Failed to resend OTP')
+    } catch (err: unknown) {
+      setErrorText(getErrorMessage(err, 'Failed to resend OTP'))
     } finally {
       setOtpLoading(false)
     }
@@ -290,7 +275,6 @@ export default function LoginPage() {
   const handleChangeNumber = () => {
     setOtpSent(false)
     setPhone('')
-    setDevOtpCode('')
     setOtpDigits(['', '', '', '', '', ''])
     setErrorText('')
     setFailedAttempts(0)
@@ -305,9 +289,48 @@ export default function LoginPage() {
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
+    setErrorText('')
     try {
       await login(email, password)
     } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'MFA_REQUIRED') {
+        setPendingMfa(true)
+        setErrorText('')
+        return
+      }
+      setErrorText(getErrorMessage(error, 'Invalid credentials'))
+    } finally {
+      setIsLoading(false)
+    }
+
+  }
+
+  const handleMfaSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    try {
+      await completeMfa(mfaCode, useRecoveryCode ? mfaRecoveryCode : undefined)
+    } catch (error) {
+      setErrorText(getErrorMessage(error, 'MFA verification failed'))
+    }
+  }
+
+  const handleResendVerification = async () => {
+    if (!email) {
+      setErrorText('Enter your email address first.')
+      return
+    }
+    setIsLoading(true)
+    try {
+      const response = await fetch('/api/v1/auth/resend-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      })
+      const result = await response.json()
+      setErrorText(result.data?.message || 'If the account needs verification, a new message will be sent.')
+    } catch {
+      setErrorText('Unable to send a verification message. Please try again.')
+    } finally {
       setIsLoading(false)
     }
   }
@@ -323,37 +346,16 @@ export default function LoginPage() {
       return
     }
 
-    if (!captchaToken) {
-      setErrorText(t('captchaRequired'))
-      return
-    }
-
-    // Capture the token and immediately clear it to prevent reuse
-    const tokenToSend = captchaToken
-    setCaptchaToken(null)
-    captchaTokenRef.current = null
-    
     const formattedPhone = '+91' + phoneBase
 
     setOtpLoading(true)
     setErrorText('')
     try {
-      const data = await sendOtp(formattedPhone, tokenToSend)
+      await sendOtp(formattedPhone)
       setOtpSent(true)
-      setTimer(30) // Start the 30-second resend cooldown
-      if (data && data.devOtp) {
-        setDevOtpCode(data.devOtp)
-      }
-    } catch (error: any) {
-      const errorMsg = error.message || 'Failed to dispatch verification code'
-      // Detect expired/invalid token errors and show a clear message
-      if (errorMsg.includes('invalid-input-response') || errorMsg.includes('already-seen')) {
-        setErrorText(t('captchaExpired'))
-      } else {
-        setErrorText(errorMsg)
-      }
-      // Reset the widget so user can re-solve
-      resetCaptcha()
+      setTimer(60)
+    } catch (error: unknown) {
+      setErrorText(getErrorMessage(error, 'Failed to dispatch verification code'))
     } finally {
       setOtpLoading(false)
     }
@@ -370,13 +372,13 @@ export default function LoginPage() {
     
     setIsLoading(true)
     try {
-      const res = await fetch('/api/v1/auth/reset-password', {
+      const res = await fetch('/api/v1/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contact: recoveryContact })
+        body: JSON.stringify({ email: recoveryContact })
       })
       const data = await res.json()
-      setRecoveryMessage(data.message)
+      setRecoveryMessage(data.data?.message || t('recoveryNotice'))
     } catch (error) {
       setRecoveryMessage(t('recoveryError'))
     } finally {
@@ -423,7 +425,7 @@ export default function LoginPage() {
             </div>
 
             {/* Tab Switched Header */}
-            {!(activeTab === 'mobile' && otpSent) && (
+            {!pendingMfa && !(activeTab === 'mobile' && otpSent) && (
               <div className="flex border-b border-white/10 mb-6 gap-2">
                 <button
                   onClick={() => { setActiveTab('mobile'); setOtpSent(false); }}
@@ -452,8 +454,46 @@ export default function LoginPage() {
               </div>
             )}
 
+            {pendingMfa && (
+              <form onSubmit={handleMfaSubmit} className="space-y-5">
+                <h2 className="text-lg font-bold text-white">Two-factor authentication</h2>
+                <p className="text-sm text-slate-400">Enter a current authenticator code or use one of your recovery codes.</p>
+                {useRecoveryCode ? (
+                  <input
+                    value={mfaRecoveryCode}
+                    onChange={event => setMfaRecoveryCode(event.target.value)}
+                    autoComplete="one-time-code"
+                    className="input"
+                    placeholder="Recovery code"
+                    required
+                  />
+                ) : (
+                  <input
+                    value={mfaCode}
+                    onChange={event => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    className="input"
+                    placeholder="6-digit authenticator code"
+                    required
+                  />
+                )}
+                {errorText && <p role="alert" className="text-sm text-red-400">{errorText}</p>}
+                <button type="submit" className="btn-primary w-full py-3">
+                  Verify and sign in
+                </button>
+                <button
+                  type="button"
+                  className="w-full text-sm text-cyan-400 hover:underline"
+                  onClick={() => setUseRecoveryCode(value => !value)}
+                >
+                  {useRecoveryCode ? 'Use an authenticator code' : 'Use a recovery code'}
+                </button>
+              </form>
+            )}
+
             {/* Mobile OTP Auth Tab */}
-            {activeTab === 'mobile' && (
+            {!pendingMfa && activeTab === 'mobile' && (
               <div className="space-y-6">
                 {!otpSent ? (
                   <form onSubmit={handleRequestOtp} className="space-y-6">
@@ -473,24 +513,6 @@ export default function LoginPage() {
                         />
                       </div>
                       <p className="text-xs text-slate-500 ml-1">{t('mobileHint')}</p>
-                    </div>
-
-                    {/* Google reCAPTCHA Bot Gating Check */}
-                    <div className="flex justify-center my-4">
-                      <ReCAPTCHA
-                        ref={recaptchaRef}
-                        sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY || '6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI'}
-                        theme="dark"
-                        onChange={(token) => {
-                          setCaptchaToken(token)
-                          captchaTokenRef.current = token
-                        }}
-                        onExpired={() => {
-                          setCaptchaToken(null)
-                          captchaTokenRef.current = null
-                          setErrorText(t('captchaExpired'))
-                        }}
-                      />
                     </div>
 
                     <button 
@@ -548,13 +570,6 @@ export default function LoginPage() {
                           </div>
                         )}
 
-                        {/* Sandbox OTP hint (non-production builds only) */}
-                        {process.env.NODE_ENV !== 'production' && devOtpCode && (
-                          <div className="mt-2 bg-cyan-950/40 border border-cyan-500/20 p-3 rounded-xl flex items-center gap-2 text-xs text-cyan-300">
-                            <Info size={14} className="shrink-0 text-cyan-400" />
-                            <span><strong>{t('devSandboxOtp')}</strong> <code className="bg-black/40 px-1.5 py-0.5 rounded font-black tracking-widest">{devOtpCode}</code></span>
-                          </div>
-                        )}
                       </div>
                     </div>
 
@@ -593,14 +608,14 @@ export default function LoginPage() {
             )}
 
             {/* Email/Password Auth Tab */}
-            {activeTab === 'email' && (
+            {!pendingMfa && activeTab === 'email' && (
               <form onSubmit={handleEmailSubmit} className="space-y-6">
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-300 ml-1">{t('emailAddress')}</label>
                   <div className="relative">
                     <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-                    <input 
-                      type="email" 
+                    <input
+                      type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
@@ -628,6 +643,7 @@ export default function LoginPage() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
+                      maxLength={128}
                       className="input pl-12"
                       placeholder="••••••••"
                     />
@@ -642,11 +658,17 @@ export default function LoginPage() {
                   {isLoading ? <Spinner size={20} className="text-white" /> : t('signIn')} 
                   {!isLoading && <ArrowRight className="w-5 h-5" />}
                 </button>
+                <div aria-live="polite" className="text-center text-sm text-slate-300">
+                  {errorText}
+                </div>
+                <button type="button" onClick={handleResendVerification} disabled={isLoading} className="w-full text-sm text-cyan-400 hover:underline">
+                  Resend email verification
+                </button>
               </form>
             )}
 
             {/* Aadhaar eKYC Auth Tab */}
-            {activeTab === 'aadhaar' && (
+            {!pendingMfa && activeTab === 'aadhaar' && (
               <div className="space-y-6">
                 <div className="space-y-2">
                   <label className="text-sm font-semibold text-slate-300 ml-1">{t('aadhaarVid')}</label>
@@ -677,16 +699,11 @@ export default function LoginPage() {
               </div>
             )}
 
-            <div className="mt-8 text-center text-sm text-slate-400">
+            {!pendingMfa && <div className="mt-8 text-center text-sm text-slate-400">
               <p className="mb-4">
                 {t('noAccount')} <Link href="/register" className="text-cyan-400 hover:underline font-semibold">{t('createAccount')}</Link>
               </p>
-              {process.env.NODE_ENV !== 'production' && (
-                <div className="bg-white/5 p-3 rounded-lg border border-white/10 text-xs">
-                  <span className="font-bold text-slate-300">{t('sandboxCredentials')}</span> <code className="bg-black/30 px-1 rounded text-cyan-400">arjun@cybershield.in</code> + <code className="bg-black/30 px-1 rounded text-cyan-400">password123</code>
-                </div>
-              )}
-            </div>
+            </div>}
           </>
         ) : (
           <form onSubmit={handleRecoverySubmit} className="space-y-6">
@@ -704,15 +721,15 @@ export default function LoginPage() {
             {!recoveryMessage && (
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <label className="text-sm font-semibold text-slate-300 ml-1">{t('emailOrPhone')}</label>
+                  <label className="text-sm font-semibold text-slate-300 ml-1">{t('emailAddress')}</label>
                   <div className="relative">
                     <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-                    <input 
-                      type="text" 
+                    <input
+                    type="email"
                       value={recoveryContact}
                       onChange={(e) => setRecoveryContact(e.target.value)}
                       required
-                      placeholder="arjun@cybershield.in or +919876543210"
+                      placeholder="name@cybershield.in"
                       className="input pl-12"
                     />
                   </div>

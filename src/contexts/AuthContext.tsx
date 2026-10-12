@@ -12,8 +12,17 @@ interface AuthContextType {
   login: (email: string, pass: string) => Promise<void>
   register: (name: string, email: string, phone: string, pass: string) => Promise<void>
   logout: () => void
-  sendOtp: (phone: string, captchaToken?: string | null) => Promise<{ devOtp?: string }>
+  sendOtp: (phone: string) => Promise<void>
   verifyOtp: (phone: string, code: string) => Promise<void>
+  completeMfa: (code: string, recoveryCode?: string) => Promise<void>
+}
+
+function authError(message: string, code?: string) {
+  return Object.assign(new Error(message), { code })
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -30,7 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (res.ok) {
         const json = await res.json()
         if (json.success && json.data) {
-          setUser(json.data)
+          setUser(json.data.user)
         } else {
           setUser(null)
         }
@@ -92,14 +101,14 @@ useEffect(() => {
 
       const data = await res.json()
       if (!res.ok || !data.success) {
-        throw new Error(data.error?.message || data.error || 'Login failed')
+        throw authError(data.error?.message || data.error || 'Login failed', data.error?.code)
       }
 
       await loadProfile()
       toast.success('Successfully logged in!')
       router.push('/app')
-    } catch (error: any) {
-      toast.error(error.message)
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, 'Login failed'))
       throw error
     } finally {
       setIsLoading(false)
@@ -116,7 +125,7 @@ useEffect(() => {
         body: JSON.stringify({
   name: name.trim(),
   email: email.trim(),
-  phone: phone.replace(/\s+/g, ''),
+  ...(phone.trim() ? { phone: phone.replace(/\s+/g, '') } : {}),
   password: pass,
 })
       })
@@ -126,11 +135,10 @@ useEffect(() => {
         throw new Error(data.error?.message || data.error || 'Registration failed')
       }
 
-      await loadProfile()
-      toast.success('Account created and logged in successfully!')
-      router.push('/app')
-    } catch (error: any) {
-      toast.error(error.message)
+      toast.success(data.data?.message || 'Account created. Check your email to verify it before signing in.')
+      router.push('/login')
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, 'Registration failed'))
       throw error
     } finally {
       setIsLoading(false)
@@ -143,32 +151,28 @@ useEffect(() => {
       setUser(null)
       toast.success('Logged out successfully')
       router.push('/login')
-    } catch (error) {
+    } catch {
       toast.error('Logout error')
     }
   }
 
-  const sendOtp = async (phone: string, captchaToken?: string | null) => {
+  const sendOtp = async (phone: string) => {
     try {
-      const payload: Record<string, string> = { phone }
-      if (captchaToken) payload.captchaToken = captchaToken
-
-      const res = await fetch('/api/auth/otp', {
+      const res = await fetch('/api/v1/auth/otp/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ phone, purpose: 'login' })
       })
 
       const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to dispatch OTP')
+      if (!res.ok || !data.success) {
+        throw new Error(data.error?.message || 'Failed to dispatch OTP')
       }
 
-      toast.success(data.message)
-      return data
-    } catch (error: any) {
-      toast.error(error.message)
+      toast.success(data.data?.message || 'If this number is eligible, a verification code will be sent.')
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, 'Failed to dispatch OTP'))
       throw error
     }
   }
@@ -176,23 +180,47 @@ useEffect(() => {
   const verifyOtp = async (phone: string, code: string) => {
     setIsLoading(true)
     try {
-      const res = await fetch('/api/auth/verify-otp', {
+      const res = await fetch('/api/v1/auth/otp/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ phone, code })
+        body: JSON.stringify({ phone, code, purpose: 'login' })
       })
 
       const data = await res.json()
-      if (!res.ok) {
-        throw new Error(data.error || 'OTP verification failed')
+      if (!res.ok || !data.success) {
+        throw authError(data.error?.message || 'OTP verification failed', data.error?.code)
       }
 
       await loadProfile()
       toast.success('Successfully logged in!')
       router.push('/app')
-    } catch (error: any) {
-      toast.error(error.message)
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, 'OTP verification failed'))
+      throw error
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const completeMfa = async (code: string, recoveryCode?: string) => {
+    setIsLoading(true)
+    try {
+      const res = await fetch('/api/v1/auth/mfa/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(recoveryCode ? { recoveryCode } : { code }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        throw authError(data.error?.message || 'MFA verification failed', data.error?.code)
+      }
+      await loadProfile()
+      toast.success('Successfully logged in!')
+      router.push('/app')
+    } catch (error: unknown) {
+      toast.error(getErrorMessage(error, 'MFA verification failed'))
       throw error
     } finally {
       setIsLoading(false)
@@ -202,7 +230,7 @@ useEffect(() => {
   const isAuthenticated = !!user;
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isAuthenticated, login, register, logout, sendOtp, verifyOtp }}>
+    <AuthContext.Provider value={{ user, isLoading, isAuthenticated, login, register, logout, sendOtp, verifyOtp, completeMfa }}>
       {children}
     </AuthContext.Provider>
   )

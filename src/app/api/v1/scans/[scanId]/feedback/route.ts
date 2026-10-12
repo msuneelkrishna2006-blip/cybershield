@@ -27,7 +27,7 @@ export async function POST(
     if (!token) return apiError('UNAUTHORIZED', 'Authentication required', 401);
 
     try {
-      verifyAccessToken(token);
+      await verifyAccessToken(token);
     } catch {
       return apiError('UNAUTHORIZED', 'Invalid or expired token', 401);
     }

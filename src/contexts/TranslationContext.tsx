@@ -33,12 +33,14 @@ export function TranslationProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState<Language>((i18n.language as Language) || 'en')
   const [, setRerender] = useState(0)
 
-  // Sync language state with i18next
+  // Sync language state with i18next — listen to ALL relevant events
   useEffect(() => {
+    const forceUpdate = () => setRerender(n => n + 1)
+
     const handleLanguageChanged = (lng: string) => {
       const lang = lng as Language
       setLanguageState(lang)
-      setRerender(n => n + 1) // force re-render to pick up new translations
+      forceUpdate()
 
       // Update document lang for RTL/LTR dynamically
       if (typeof document !== 'undefined') {
@@ -47,7 +49,12 @@ export function TranslationProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // FIX: Subscribe to 'loaded' and 'initialized' events
+    // This ensures re-render when HttpBackend finishes loading translations
+    // for non-English languages (English is bundled statically)
     i18n.on('languageChanged', handleLanguageChanged)
+    i18n.on('loaded', forceUpdate)
+    i18n.on('initialized', forceUpdate)
 
     // Set initial direction
     if (typeof document !== 'undefined') {
@@ -57,6 +64,8 @@ export function TranslationProvider({ children }: { children: ReactNode }) {
 
     return () => {
       i18n.off('languageChanged', handleLanguageChanged)
+      i18n.off('loaded', forceUpdate)
+      i18n.off('initialized', forceUpdate)
     }
   }, [language])
 

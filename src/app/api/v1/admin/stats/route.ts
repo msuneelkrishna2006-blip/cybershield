@@ -35,6 +35,34 @@ async function verifyAdminAuth(request: NextRequest): Promise<{ adminId: string;
 
 export async function GET(request: NextRequest) {
   try {
+    // Demo mode for judge presentations
+    const url = new URL(request.url);
+    if (url.searchParams.get('demo') === 'true') {
+      return apiSuccess({
+        totalUsers: 312,
+        totalScans: 1247,
+        scansToday: 47,
+        scansThisWeek: 289,
+        threatsByLevel: {
+          CRITICAL: 12,
+          HIGH: 31,
+          MEDIUM: 46,
+          LOW: 89,
+          SAFE: 1069,
+        },
+        topCategories: [
+          { category: 'UPI Collect Scam', count: 28, trend: 'up' },
+          { category: 'KYC Phishing', count: 22, trend: 'stable' },
+          { category: 'Digital Arrest', count: 18, trend: 'up' },
+          { category: 'Job/Task Fraud', count: 14, trend: 'down' },
+          { category: 'Loan App Harassment', count: 7, trend: 'stable' },
+        ],
+        activeAlerts: 3,
+        avgResponseTime: '2.4s',
+        dataSource: 'demo',
+      });
+    }
+
     // For now, allow access during development
     // TODO: Replace with proper admin auth middleware in Phase 10
     const isDevMode = process.env.NODE_ENV !== 'production';

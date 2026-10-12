@@ -1,5 +1,16 @@
 import type { User, GuardianAlert } from '@prisma/client'
 
+function maskContact(value: string): string {
+  if (value.includes('@')) {
+    const [local = '', domain = ''] = value.split('@')
+    return `${local[0] || '*'}***@${domain[0] || '*'}***`
+  }
+
+  const digits = value.replace(/\D/g, '')
+  const suffix = digits.slice(-4)
+  return value.startsWith('+91') ? `+91******${suffix}` : `******${suffix}`
+}
+
 export interface NotificationService {
   notifyGuardians(alert: GuardianAlert, guardians: User[]): Promise<void>
   notifyAlertUpdate(alertId: string, guardianId: string, action: string, guardians: User[]): Promise<void>
@@ -14,7 +25,7 @@ class MockNotificationService implements NotificationService {
     console.log(`   Title: ${alert.title}`)
     console.log(`   Description: ${alert.description}`)
     console.log(`   Location: ${alert.lat ? `${alert.lat}, ${alert.lng}` : 'None'}`)
-    console.log(`   Recipients: ${guardians.map((g) => `${g.name} (${g.phone || g.email})`).join(', ')}`)
+    console.log(`   Recipients: ${guardians.map((g) => `${g.name} (${maskContact(g.phone || g.email || '')})`).join(', ')}`)
     
     // Simulate SMS dispatch to Twilio
     if (process.env.TWILIO_ACCOUNT_SID) {

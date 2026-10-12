@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
     
     let payload;
     try {
-      payload = verifyAccessToken(token);
+      payload = await verifyAccessToken(token);
     } catch {
       return apiError('UNAUTHORIZED', 'Invalid or expired token', 401);
     }
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     
     let payload;
     try {
-      payload = verifyAccessToken(token);
+      payload = await verifyAccessToken(token);
     } catch {
       return apiError('UNAUTHORIZED', 'Invalid or expired token', 401);
     }
@@ -78,7 +78,7 @@ export async function DELETE(request: NextRequest) {
     
     let payload;
     try {
-      payload = verifyAccessToken(token);
+      payload = await verifyAccessToken(token);
     } catch {
       return apiError('UNAUTHORIZED', 'Invalid or expired token', 401);
     }

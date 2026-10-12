@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card, Badge, Spinner, RiskScore } from '@/components/ui'
 import { useTranslation } from '@/contexts/TranslationContext'
-import { Search, Link as LinkIcon, Image as ImageIcon, QrCode, ShieldCheck, AlertTriangle, MessageSquareWarning, Info, Bot } from 'lucide-react'
+import { Search, Link as LinkIcon, Image as ImageIcon, QrCode, ShieldCheck, AlertTriangle, MessageSquareWarning, Info, Bot, Mail, MessageCircle } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { ScannerErrorBoundary } from '@/components/ui/ScannerErrorBoundary'
 
@@ -22,6 +22,18 @@ interface ScanApiResult {
     explanation: string;
     recommendedAction: string;
     safeNextSteps: string[];
+  };
+  pipeline?: {
+    verdict: string;
+    agents: Array<{
+      agentName: string;
+      agentNumber: number;
+      summary: string;
+      signals: Array<{ type: string; description: string; severity: string; score: number }>;
+      riskContribution: number;
+    }>;
+    recommendations: string[];
+    helpline?: string;
   };
   metadata: {
     provider: string;
@@ -41,10 +53,12 @@ interface ScanHistoryItem {
 }
 
 const TABS = [
-  { id: 'text', labelKey: 'tabMessage', icon: MessageSquareWarning },
-  { id: 'link', labelKey: 'tabLink', icon: LinkIcon },
-  { id: 'qr', labelKey: 'tabQr', icon: QrCode },
-  { id: 'image', labelKey: 'tabScreenshot', icon: ImageIcon },
+  { id: 'text', labelKey: 'tabMessage', icon: MessageSquareWarning, scanType: 'sms', placeholder: 'Paste any suspicious SMS message here...' },
+  { id: 'link', labelKey: 'tabLink', icon: LinkIcon, scanType: 'url', placeholder: 'Paste a suspicious URL or link here...' },
+  { id: 'email', labelKey: 'tabEmail', icon: Mail, scanType: 'email', placeholder: 'Paste email content (including headers if available)...' },
+  { id: 'whatsapp', labelKey: 'tabWhatsApp', icon: MessageCircle, scanType: 'whatsapp', placeholder: 'Paste a suspicious WhatsApp message here...' },
+  { id: 'qr', labelKey: 'tabQr', icon: QrCode, scanType: 'qr', placeholder: 'Scan or paste QR code content...' },
+  { id: 'image', labelKey: 'tabScreenshot', icon: ImageIcon, scanType: 'general', placeholder: 'Upload a screenshot for OCR analysis...' },
 ]
 
 export default function ScamScannerPage() {
@@ -120,17 +134,31 @@ export default function ScamScannerPage() {
     setIsCameraMode(false)
   }, [])
 
+  const [agentProgress, setAgentProgress] = useState<string>('')
+
   const performRealScan = async (finalInput: string, scanType: string) => {
     setResult(null)
     setScanError(null)
     setIsScanning(true)
+    setAgentProgress('Agent 1: Analyzing content for scam patterns...')
 
     try {
+      // Show agent progress animation
+      const progressTimer = setInterval(() => {
+        setAgentProgress(prev => {
+          if (prev.includes('Agent 1')) return 'Agent 2: Checking domain reputation & threat database...'
+          if (prev.includes('Agent 2')) return 'Agent 3: AI generating verdict...'
+          return prev
+        })
+      }, 1500)
+
       const res = await fetch('/api/v1/scans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: finalInput, type: scanType })
+        body: JSON.stringify({ content: finalInput, type: scanType, pipeline: true })
       })
+      clearInterval(progressTimer)
+      setAgentProgress('')
       const data = await res.json()
 
       if (data.success && data.data) {
@@ -161,7 +189,8 @@ export default function ScamScannerPage() {
     setIsScanning(true)
 
     let finalInput = input
-    let scanType = activeTab === 'text' ? 'sms' : activeTab === 'link' ? 'url' : activeTab === 'qr' ? 'qr' : 'general'
+    const currentTab = TABS.find(tab => tab.id === activeTab)
+    let scanType = currentTab?.scanType || 'general'
 
     if ((activeTab === 'image' || activeTab === 'qr') && selectedFile) {
       const formData = new FormData()
@@ -464,7 +493,9 @@ export default function ScamScannerPage() {
                     </div>
                     <div>
                       <h4 className="font-bold text-white mb-1">{t('scanning')}</h4>
-                      <p className="text-sm text-cyan-400">Analyzing content in real-time...</p>
+                      <p className="text-sm text-cyan-400 animate-pulse">
+                        {agentProgress || 'Initializing multi-agent pipeline...'}
+                      </p>
                     </div>
                   </div>
                 </Card>
@@ -480,29 +511,74 @@ export default function ScamScannerPage() {
                 animate={{ opacity: 1, y: 0 }}
               >
                 <Card className={`border-2 ${getRiskColorClass(result.result.riskLevel)}`}>
-                  <div className="flex items-start gap-6 mb-8">
+                  <div className="flex items-start gap-6 mb-4">
                     <RiskScore score={result.result.riskScore} size={80} />
                     <div className="flex-1 pt-2">
+                      {/* Pipeline verdict — one-line plain-language verdict FIRST */}
+                      {result.pipeline?.verdict && (
+                        <p className="text-xl font-black mb-3 leading-snug">
+                          {result.pipeline.verdict}
+                        </p>
+                      )}
                       <div className="flex items-center gap-3 mb-2">
-                        <h3 className="text-2xl font-black uppercase tracking-wider">
+                        <h3 className="text-lg font-bold uppercase tracking-wider">
                           {['CRITICAL', 'HIGH'].includes(result.result.riskLevel.toUpperCase()) ? t('threatDetected') : t('contentSafe')}
                         </h3>
                         <Badge variant={getRiskBadgeVariant(result.result.riskLevel) as any}>
                           {formatCategory(result.result.category)}
                         </Badge>
                       </div>
-                      <p className="text-slate-300 leading-relaxed">{result.result.explanation}</p>
+                      {!result.pipeline?.verdict && (
+                        <p className="text-slate-300 leading-relaxed">{result.result.explanation}</p>
+                      )}
                       
                       <div className="mt-3 flex items-center gap-4">
                         <p className="text-xs text-slate-400">
                           Confidence: <span className="text-white font-bold">{(result.result.confidence * 100).toFixed(0)}%</span>
                         </p>
                         <p className="text-xs text-slate-400">
-                          Analyzed by: <span className="text-cyan-400 font-bold">{result.metadata.provider === 'gemini' ? 'Gemini AI' : 'Heuristic Engine'}</span>
+                          Analyzed by: <span className="text-cyan-400 font-bold">{result.metadata.provider === 'pipeline' ? 'Multi-Agent Pipeline' : result.metadata.provider === 'gemini' ? 'Gemini AI' : 'Heuristic Engine'}</span>
                         </p>
+                        {result.pipeline?.helpline && (
+                          <a href={`tel:${result.pipeline.helpline.match(/\d+/)?.[0]}`} className="text-xs font-bold bg-red-500/20 text-red-400 px-2 py-1 rounded border border-red-500/30 hover:bg-red-500/30">
+                            📞 {result.pipeline.helpline}
+                          </a>
+                        )}
                       </div>
                     </div>
                   </div>
+
+                  {/* Agent Reasoning — collapsible technical details */}
+                  {result.pipeline?.agents && result.pipeline.agents.length > 0 && (
+                    <details className="mb-6 bg-black/30 rounded-xl border border-white/5 overflow-hidden">
+                      <summary className="px-5 py-3 cursor-pointer text-sm font-bold text-slate-400 hover:text-white transition-colors flex items-center gap-2">
+                        <Bot size={16} className="text-cyan-400" />
+                        View Agent Analysis ({result.pipeline.agents.length} agents ran)
+                      </summary>
+                      <div className="px-5 pb-5 space-y-3">
+                        {result.pipeline.agents.map((agent, i) => (
+                          <div key={i} className="bg-white/5 rounded-lg p-4 border border-white/5">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="bg-cyan-500/20 text-cyan-400 text-xs font-bold px-2 py-0.5 rounded">Agent {agent.agentNumber}</span>
+                              <span className="font-bold text-sm text-white">{agent.agentName}</span>
+                              <span className="text-xs text-slate-500 ml-auto">Risk: {agent.riskContribution}/100</span>
+                            </div>
+                            <p className="text-xs text-slate-400 mb-2">{agent.summary}</p>
+                            {agent.signals.length > 0 && (
+                              <div className="space-y-1">
+                                {agent.signals.map((signal, j) => (
+                                  <div key={j} className="flex items-center gap-2 text-xs">
+                                    <span className={`w-1.5 h-1.5 rounded-full ${signal.severity === 'critical' ? 'bg-red-500' : signal.severity === 'high' ? 'bg-orange-500' : signal.severity === 'medium' ? 'bg-yellow-500' : 'bg-slate-500'}`} />
+                                    <span className="text-slate-300">{signal.description}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
 
                   <div className="space-y-6">
                     {/* Recommendations */}

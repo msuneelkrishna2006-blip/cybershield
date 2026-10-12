@@ -10,6 +10,8 @@ import { verifyAccessToken } from '@/lib/auth/jwt';
 import { getAccessToken } from '@/lib/auth/cookies';
 import { listUserSessions, revokeAllUserSessions } from '@/lib/auth/session';
 import { apiSuccess, apiError } from '@/lib/api/response';
+import { hasValidCsrfOrigin } from '@/lib/auth/csrf';
+import { getRequestIp } from '@/lib/auth/rate-limit';
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,7 +20,7 @@ export async function GET(request: NextRequest) {
 
     let payload;
     try {
-      payload = verifyAccessToken(token);
+      payload = await verifyAccessToken(token);
     } catch {
       return apiError('UNAUTHORIZED', 'Invalid or expired token', 401);
     }
@@ -42,29 +44,25 @@ export async function GET(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  if (!hasValidCsrfOrigin(request)) {
+    return apiError('CSRF_REJECTED', 'Request origin could not be verified', 403);
+  }
   try {
     const token = getAccessToken(request);
     if (!token) return apiError('UNAUTHORIZED', 'Authentication required', 401);
 
     let payload;
     try {
-      payload = verifyAccessToken(token);
+      payload = await verifyAccessToken(token);
     } catch {
       return apiError('UNAUTHORIZED', 'Invalid or expired token', 401);
     }
 
     // Revoke all sessions except current
-    await revokeAllUserSessions(payload.userId);
+    await revokeAllUserSessions(payload.userId, payload.sessionId);
 
-    // Re-create current session (keep user logged in)
-    // The current token remains valid until it expires
-
-    // Revoke all refresh tokens except for current session
     await prisma.refreshToken.updateMany({
-      where: {
-        userId: payload.userId,
-        revoked: false,
-      },
+      where: { userId: payload.userId, sessionId: { not: payload.sessionId }, revoked: false },
       data: { revoked: true },
     });
 
@@ -72,7 +70,7 @@ export async function DELETE(request: NextRequest) {
       data: {
         userId: payload.userId,
         eventType: 'ALL_SESSIONS_REVOKED',
-        ipAddress: request.headers.get('x-forwarded-for') || 'unknown',
+        ipAddress: getRequestIp(request),
         userAgent: request.headers.get('user-agent') || 'unknown',
       },
     });
