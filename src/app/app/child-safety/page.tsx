@@ -170,6 +170,7 @@ function GuardianView({
   setSelectedChildId
 }: GuardianViewProps) {
   const { t } = useTranslation('childSafety')
+  const { fetchWithStepUp, stepUpModal } = useStepUpFetch()
   const [activeTab, setActiveTab] = useState<'dashboard' | 'analyze'>('dashboard')
   
   const activeChild = childrenList.find(c => c.id === selectedChildId)
@@ -210,8 +211,9 @@ function GuardianView({
           }
         })
       })
-    } catch (e) {
-      console.error(e)
+      if (!response.ok) throw new Error('Unable to update child safety settings.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to update child safety settings.')
     }
   }
 
